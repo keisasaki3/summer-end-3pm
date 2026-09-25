@@ -26,12 +26,12 @@ if errorlevel 1 (
 if exist ".nantoka_update_tmp" rmdir /s /q ".nantoka_update_tmp"
 mkdir ".nantoka_update_tmp"
 
-echo [1/5] Extracting update.zip...
+echo [1/6] Extracting update.zip...
 powershell -NoProfile -ExecutionPolicy Bypass -Command ^
   "Expand-Archive -LiteralPath 'update.zip' -DestinationPath '.nantoka_update_tmp' -Force"
 if errorlevel 1 goto :fail
 
-echo [2/5] Removing obsolete files...
+echo [2/6] Removing obsolete files...
 if exist ".nantoka_update_tmp\.nantoka-delete.txt" (
   for /f "usebackq delims=" %%F in (".nantoka_update_tmp\.nantoka-delete.txt") do (
     if not "%%F"=="" (
@@ -42,17 +42,21 @@ if exist ".nantoka_update_tmp\.nantoka-delete.txt" (
   del /f /q ".nantoka_update_tmp\.nantoka-delete.txt" >nul 2>&1
 )
 
-echo [3/5] Applying update...
+echo [3/6] Applying update...
 xcopy ".nantoka_update_tmp\*" "." /E /Y /I /Q >nul
 if errorlevel 1 goto :fail
 
 rmdir /s /q ".nantoka_update_tmp"
 
-echo [4/5] Building...
+echo [4/6] Installing dependencies...
+call npm install
+if errorlevel 1 goto :fail
+
+echo [5/6] Building...
 call npm run build
 if errorlevel 1 goto :fail
 
-echo [5/5] Starting server...
+echo [6/6] Starting server...
 for /f "tokens=5" %%P in ('netstat -ano ^| findstr ":8080" ^| findstr "LISTENING"') do (
   taskkill /PID %%P /F >nul 2>&1
 )

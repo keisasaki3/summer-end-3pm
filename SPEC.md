@@ -15,6 +15,7 @@
 - Vite
 - Node.js
 - ws
+- Supabase Auth / PostgreSQL（Shared World Core）
 - Browser first
 
 ## 現行マップ
@@ -25,24 +26,28 @@
 ## プレイヤー種族
 ### テディぐま
 - race-id: `teddy`
-- 隠し移動速度: 168
-- sizeClass: standard
-- visualScale: 1.0
+- move_speed: 168
+- visual_scale: 1.0
 
 ### いにしえロボット
 - race-id: `ancient-robot`
-- 隠し移動速度: 176
-- sizeClass: standard
-- visualScale: 1.0
-- テディぐまより気持ちだけ速い
+- move_speed: 176
+- visual_scale: 1.0
 
 ### うさぎjk
 - race-id: `rabbit-jk`
-- 隠し移動速度: 168
-- sizeClass: standard
-- visualScale: 1.0
+- move_speed: 168
+- visual_scale: 1.0
 
-キャラクター画像規格は `CHARACTER_SPRITE_SPEC.md` v1.0 を参照。
+種族マスタの正本はShared World Coreの `races`。クライアントはログイン時に `races` を読み込み、`sprite_key / visual_scale / move_speed` を使用する。
+現行のスプライト規格は `CHARACTER_SPRITE_SPEC.md` を参照。
+
+## キャラクター外見
+- 共通人格の外見は `profiles.race_id` のみで決定する
+- 同じrace-idは全プレイヤー同じ外見
+- 個別の身長・髪・服・色などのアバターカスタマイズ値は持たない
+- 認証モードではWebSocket serverが `height=1` / 固定色として扱い、client任意値を外見の正本にしない
+- 重なり描画は足元Y座標でY-sortし、画面下側のキャラクターを前面に描画する
 
 ## キャラクターアセット運用
 - 正式シート: `public/sprites/sheets/<race-id>.png`
@@ -52,7 +57,7 @@
 - `npm run build` は検品成功後のみ実行
 
 ## 実装運用
-1. 仕様書を読む
+1. GitHub上の仕様書を読む
 2. TODOを読む
 3. TODOに基づいて実装する
 4. 実装・検証する
@@ -60,60 +65,99 @@
 6. 実装後の状態に合わせて仕様書を更新する
 7. `update.zip` と完全版ZIPを出力する
 
-仕様変更が確定した場合、コードだけ変更して仕様書を放置しない。
-
 2026-09-26以降、GitHub上の仕様書をSource of Truthとする。ChatGPT上の会話は設計履歴であり、確定仕様と矛盾する場合はGitを優先する。
 
-## TODO
-現在、仕様書に記載された実装対象TODOはなし。
+## 共通アカウント / Shared World Core
+人生クエストと同じSupabase project / Shared World Coreを利用する。
+共通仕様の正本は `keisasaki3/keisasaki3.github.io/shared-world-core/`。
 
-新しい未実装仕様が決定した場合は、この欄へ追加してから実装する。
+### Authentication
+- Google OAuth
+- Email + Password
+- `auth.users.id` を永続プレイヤーIDとして使用
+- clientは任意の `user_id` をWebSocketへ送信しない
+- WebSocket接続時にclientはSupabase access tokenを送信する
+- serverは `SUPABASE_SERVICE_ROLE_KEY` を用いてaccess tokenを検証し、検証済み `auth.users.id` からplayer idを決定する
+- service role keyはserver専用。client bundleへ含めない
+
+### Shared profile
+- `profiles.display_name` = 共通表示名
+- `profiles.race_id` = 共通種族
+- race_id未設定時はゲーム参加前に種族選択を要求
+- profile/raceはserver側でもDBから再取得し、WebSocket join payloadのname/raceを認証モードでは信用しない
+
+### Shared presence
+`player_presence.status`:
+- `studying` / 勉強中
+- `reading` / 読書中
+- `busy` / 取り込み中
+- `afk` / AFK
+
+ステータスはキャラクター名札とOPTIONSに反映する。
+serverはjoin/status変更時に保存し、heartbeat中は `last_seen_at` を間引いて更新する。
+
+## 夏の果固有の永続状態
+`summer_end_player_state`:
+- `user_id`
+- `map_id`
+- `x`
+- `y`
+- `direction`
+- `updated_at`
+
+リアルタイム位置のauthoritative sourceは既存WebSocket serverのまま維持する。
+Supabaseへ毎フレーム座標を書き込まない。
+
+保存タイミング:
+- 15秒程度のthrottled snapshot
+- map transition
+- 現在のauthenticated socketのdisconnect/logout
+
+復元:
+- ページ再読込/再ログインではDBの保存位置から復帰
+- 一時的なWebSocket切断からの1/2/4/8秒reconnectではclient内の現在位置を優先して復帰し、DBの最大15秒古いsnapshotへの巻き戻りを防ぐ
+- `direction` も保存/復元する
+
+## オンライン接続 / Presence snapshot
+既存機構を維持する。
+- client: 12秒ごとのapplication heartbeat
+- heartbeat response: 同一mapのauthoritative player snapshot
+- server: 25秒ごとのWebSocket ping/pong
+- reconnect: 1 / 2 / 4 / 8秒 backoff
+- map-aware join/move/chat/leave
+- heartbeat snapshotで取りこぼしたjoin/leaveを自己修復
+- authenticated modeでは `auth.users.id` がWebSocket player id
+- 同一accountの重複接続は新しいsocketを優先し、古いsocketを閉じる
+
+## Supabase設定
+Client build-time:
+- `VITE_SUPABASE_URL`
+- `VITE_SUPABASE_PUBLISHABLE_KEY`（legacy anon keyの場合は `VITE_SUPABASE_ANON_KEY` も対応）
+
+Server runtime:
+- `SUPABASE_URL`
+- `SUPABASE_SERVICE_ROLE_KEY`
+
+secret値はGitへcommitしない。`.env.example` は変数名のみを管理する。
+
+4変数が未設定の場合は、既存ゲームを壊さないためlegacy compatibility modeで起動する。このモードではrandom session idを使用し、client-supplied user_idは受け付けない。共通バックエンドの本番要件を満たすのは4変数が設定されたSupabase modeのみ。
 
 ## クイズ
 - 教養クイズ機能は現在一時停止中
-- サーバーは出題タイマーを起動しない
-- クライアントはクイズUIを生成しない
-- 再開時は `QUIZ_ENABLED` とクライアントUIを再有効化する
-
-## オンライン接続 / Presence
-- クライアントは12秒ごとにアプリレベルheartbeatを送信する
-- heartbeat応答には同一マップのauthoritative presence snapshotを含め、表示漏れを自己修復する
-- サーバーは25秒ごとにWebSocket pingを送信し、アイドル接続を維持・死活監視する
-- 接続断時はクライアントが1/2/4/8秒のバックオフで自動再接続する
-- 再接続時は現在マップ・座標・種族を再送し、その場から復帰する
-
-## 共通アカウント / Shared World Core
-
-人生クエストと同じSupabase Auth / Shared World Coreを利用する方針を採用する。
-
-共通化するデータ:
-- `auth.users.id` を永続プレイヤーIDとして使用
-- `profiles.display_name`
-- `profiles.race_id`
-- `races`
-- `player_presence`
-
-キャラクターは種族だけを選択し、各race-idに対して全プレイヤー同一の見た目を使用する。個別の髪・服・色などのアバターカスタマイズ値は持たない。
-
-夏の果固有の永続状態:
-- 現在マップ
-- x / y座標
-- 向き
-
-これらは `summer_end_player_state` へ保存する。ただしリアルタイム移動は既存WebSocket serverをauthoritativeとし、DBへ毎フレーム位置を書き込まない。
-
-共通表示ステータス:
-- studying / 勉強中
-- reading / 読書中
-- busy / 取り込み中
-- afk / AFK
-
-詳細は `docs/SHARED_BACKEND.md` を参照。共通DBの正本は `keisasaki3/keisasaki3.github.io/shared-world-core/` に置く。
+- serverは出題timerを起動しない
+- clientはクイズUIを生成しない
 
 ## マップ音響
 - 旧BGM `Late Summer at the Pier` は削除済み
 - 現在は全マップ無音
-- 各マップは `audio.bgmKey` と `audio.ambienceKeys` を持つ
-- 音源ファイルは `audioAssets` に key -> URL を登録し、マップ側はkeyを参照する
-- マップ移動時に現在音響を停止し、新マップ設定へ自動切替する
+- 各mapは `audio.bgmKey` と `audio.ambienceKeys` を持つ
 - 今後の環境音実装は `ambienceKeys` を使用する
+
+## TODO
+### Production activation
+- 共通Supabase projectへ `shared-world-core/supabase/migrations/001_initial_schema.sql` と `seed.sql` を適用
+- Google provider / redirect URLをSupabase側で設定
+- Renderへ4つのSupabase環境変数を設定
+- 実Supabase環境でcross-browser / persistence / multi-user E2E検証を完了する
+
+コード実装自体はβ0.49で完了。上記は外部Supabase projectが用意された後のactivation/実環境検証項目。
