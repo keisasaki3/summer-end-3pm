@@ -62,6 +62,8 @@
 
 仕様変更が確定した場合、コードだけ変更して仕様書を放置しない。
 
+2026-09-26以降、GitHub上の仕様書をSource of Truthとする。ChatGPT上の会話は設計履歴であり、確定仕様と矛盾する場合はGitを優先する。
+
 ## TODO
 現在、仕様書に記載された実装対象TODOはなし。
 
@@ -79,6 +81,34 @@
 - サーバーは25秒ごとにWebSocket pingを送信し、アイドル接続を維持・死活監視する
 - 接続断時はクライアントが1/2/4/8秒のバックオフで自動再接続する
 - 再接続時は現在マップ・座標・種族を再送し、その場から復帰する
+
+## 共通アカウント / Shared World Core
+
+人生クエストと同じSupabase Auth / Shared World Coreを利用する方針を採用する。
+
+共通化するデータ:
+- `auth.users.id` を永続プレイヤーIDとして使用
+- `profiles.display_name`
+- `profiles.race_id`
+- `races`
+- `player_presence`
+
+キャラクターは種族だけを選択し、各race-idに対して全プレイヤー同一の見た目を使用する。個別の髪・服・色などのアバターカスタマイズ値は持たない。
+
+夏の果固有の永続状態:
+- 現在マップ
+- x / y座標
+- 向き
+
+これらは `summer_end_player_state` へ保存する。ただしリアルタイム移動は既存WebSocket serverをauthoritativeとし、DBへ毎フレーム位置を書き込まない。
+
+共通表示ステータス:
+- studying / 勉強中
+- reading / 読書中
+- busy / 取り込み中
+- afk / AFK
+
+詳細は `docs/SHARED_BACKEND.md` を参照。共通DBの正本は `keisasaki3/keisasaki3.github.io/shared-world-core/` に置く。
 
 ## マップ音響
 - 旧BGM `Late Summer at the Pier` は削除済み
