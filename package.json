@@ -1,0 +1,22 @@
+{
+  "name": "nantoka-online-beta-047",
+  "private": true,
+  "scripts": {
+    "dev": "concurrently \"npm:dev:server\" \"npm:dev:client\"",
+    "dev:client": "vite --host 0.0.0.0",
+    "dev:server": "node server/server.js --dev",
+    "build": "npm run validate:sprites && vite build",
+    "start": "node server/server.js",
+    "validate:sprites": "node scripts/validate-sprites.mjs"
+  },
+  "dependencies": {
+    "phaser": "^3.90.0",
+    "ws": "^8.18.3"
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.1",
+    "typescript": "^5.9.2",
+    "vite": "^7.1.5"
+  },
+  "version": "0.47.0-beta.1"
+}

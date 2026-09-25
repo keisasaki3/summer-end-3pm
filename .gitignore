@@ -1,0 +1,6 @@
+node_modules/
+dist/
+.nantoka_update_tmp/
+update.zip
+*.log
+.env
