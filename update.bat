@@ -1,11 +1,11 @@
 @echo off
 setlocal EnableExtensions
 cd /d "%~dp0"
-title なんとかOnline Updater
+title 午後三時、夏の果。 Updater
 
 echo.
 echo ========================================
-echo   なんとかOnline - One Click Update
+echo   午後三時、夏の果。 - One Click Update
 echo ========================================
 echo.
 
@@ -56,7 +56,7 @@ echo [5/5] Starting server...
 for /f "tokens=5" %%P in ('netstat -ano ^| findstr ":8080" ^| findstr "LISTENING"') do (
   taskkill /PID %%P /F >nul 2>&1
 )
-start "なんとかOnline Server" cmd /k "cd /d ""%~dp0"" && npm start"
+start "午後三時、夏の果。 Server" cmd /k "cd /d ""%~dp0"" && npm start"
 
 echo.
 echo ========================================

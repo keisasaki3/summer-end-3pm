@@ -181,7 +181,7 @@ function broadcastMap(map, data, except) {
 function serveStatic(req, res) {
   if (DEV) {
     res.writeHead(200, { "Content-Type": "text/plain; charset=utf-8" });
-    res.end("なんとかOnline WebSocket dev server");
+    res.end("午後三時、夏の果。 WebSocket dev server");
     return;
   }
 
@@ -375,7 +375,7 @@ if (QUIZ_ENABLED) {
 
 server.listen(PORT, "0.0.0.0", () => {
   console.log("");
-  console.log("なんとかOnline β 0.47");
+  console.log("午後三時、夏の果。 β 0.47");
   console.log(`Server: http://localhost:${PORT}`);
   console.log(`Mode: ${DEV ? "development websocket-only" : "production single-URL"}`);
   if (!DEV) {

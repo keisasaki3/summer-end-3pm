@@ -1,11 +1,11 @@
-﻿@echo off
+@echo off
 setlocal EnableExtensions
 cd /d "%~dp0"
-title Publish 午後三時、夏の果 to GitHub
+title Publish 午後三時、夏の果。 to GitHub
 
 echo.
 echo ========================================
-echo   GitHub Initial Publish
+echo   午後三時、夏の果。 - GitHub Publish
 echo   keisasaki3/summer-end-3pm
 echo ========================================
 echo.
@@ -18,23 +18,11 @@ if errorlevel 1 (
   exit /b 1
 )
 
-if not exist ".gitignore" (
-  >".gitignore" (
-    echo node_modules/
-    echo dist/
-    echo .nantoka_update_tmp/
-    echo update.zip
-    echo *.log
-    echo .env
-  )
-)
-
 if not exist ".git" (
   git init
   if errorlevel 1 goto :fail
 )
 
-rem Local-only author identity for this repository.
 git config user.name "keisasaki3"
 git config user.email "61055342+keisasaki3@users.noreply.github.com"
 
@@ -50,7 +38,7 @@ if errorlevel 1 goto :fail
 
 git diff --cached --quiet
 if errorlevel 1 (
-  git commit -m "Publish beta 0.47"
+  git commit -m "Refactor game name to 午後三時、夏の果。"
   if errorlevel 1 goto :fail
 ) else (
   echo [INFO] No new local changes to commit.
@@ -58,30 +46,16 @@ if errorlevel 1 (
 
 git branch -M main
 if errorlevel 1 goto :fail
-
-echo.
-echo Pushing the complete project to GitHub...
-echo A GitHub sign-in window may open the first time.
-echo.
-
-rem Safe for this initial publish because the remote repository was verified
-rem to contain only the auto-created README commit.
-git push -u origin main --force
+git push -u origin main
 if errorlevel 1 goto :fail
 
 echo.
-echo ========================================
-echo   Publish complete.
-echo   https://github.com/keisasaki3/summer-end-3pm
-echo ========================================
-echo.
+echo Publish complete.
 pause
 exit /b 0
 
 :fail
 echo.
 echo [ERROR] GitHub publish failed.
-echo Read the Git error above. No local project files were deleted.
-echo.
 pause
 exit /b 1

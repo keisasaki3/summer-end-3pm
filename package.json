@@ -1,5 +1,5 @@
 {
-  "name": "nantoka-online-beta-047",
+  "name": "summer-end-3pm",
   "private": true,
   "scripts": {
     "dev": "concurrently \"npm:dev:server\" \"npm:dev:client\"",
