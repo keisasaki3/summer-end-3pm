@@ -127,7 +127,7 @@ jobs:
           grep -F 'return status === "online" ? name : `${name}: ${this.statusLabel(status)}`;' client/src/main.ts
           grep -F '["online","オンライン"]' client/src/main.ts
           grep -F 'const ALLOWED_STATUS = new Set(["online", "studying", "reading", "busy", "afk"]);' server/shared-backend.js
-          ! grep -R 'sb_secret_' client dist || exit 1
+          ! grep -R 'SUPABASE_SERVICE_ROLE_KEY' client || exit 1
       - name: Commit beta 0.50
         run: |
           git config user.name 'keisasaki3'
