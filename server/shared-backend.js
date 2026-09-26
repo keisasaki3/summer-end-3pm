@@ -14,10 +14,10 @@ const client = enabled
     })
   : null;
 
-const ALLOWED_STATUS = new Set(["studying", "reading", "busy", "afk"]);
+const ALLOWED_STATUS = new Set(["online", "studying", "reading", "busy", "afk"]);
 
 function normalizeStatus(value) {
-  return ALLOWED_STATUS.has(value) ? value : "afk";
+  return ALLOWED_STATUS.has(value) ? value : "online";
 }
 
 function backendError(code, message, cause) {
@@ -90,7 +90,7 @@ async function setPresenceStatus(userId, status) {
   return normalized;
 }
 
-async function touchPresence(userId, fallbackStatus = "afk") {
+async function touchPresence(userId, fallbackStatus = "online") {
   const admin = requireClient();
   const now = new Date().toISOString();
   const { data, error } = await admin

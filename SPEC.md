@@ -1,6 +1,6 @@
 # 午後三時、夏の果。 — 実装仕様（現行）
 
-更新: 2026-09-26 / β 0.49
+更新: 2026-09-26 / β 0.50
 
 ## 1. 作品
 
@@ -71,6 +71,7 @@ Supabase Auth を使用する。
 
 Shared World Core の `player_presence.status` に対応する。
 
+- `online` — オンライン（頭上は名前のみ）
 - `studying` — 勉強中
 - `reading` — 読書中
 - `busy` — 取り込み中

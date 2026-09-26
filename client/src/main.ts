@@ -75,7 +75,7 @@ class WalkScene extends Phaser.Scene {
   private playerRace = "teddy";
   private authUserId = "";
   private accessToken = "";
-  private presenceStatus: PresenceStatus = "afk";
+  private presenceStatus: PresenceStatus = "online";
   private loginOpen = true;
   private money = 0;
   private moneyHud?: HTMLDivElement;
@@ -137,17 +137,18 @@ class WalkScene extends Phaser.Scene {
   }
 
   private normalizeStatus(value:unknown):PresenceStatus {
-    return value === "studying" || value === "reading" || value === "busy" ? value : "afk";
+    return value === "online" || value === "studying" || value === "reading" || value === "busy" || value === "afk" ? value : "online";
   }
 
   private statusLabel(status:PresenceStatus) {
-    return status === "studying" ? "勉強中" :
+    return status === "online" ? "" :
+      status === "studying" ? "勉強中" :
       status === "reading" ? "読書中" :
       status === "busy" ? "取り込み中" : "AFK";
   }
 
   private playerLabel(name:string,status:PresenceStatus) {
-    return `${name}　[${this.statusLabel(status)}]`;
+    return status === "online" ? name : `${name}: ${this.statusLabel(status)}`;
   }
 
   private normalizeDirection(value:unknown):Direction {
@@ -219,7 +220,7 @@ class WalkScene extends Phaser.Scene {
     void this.setupLogin();
     this.setupCollisionMap();
 
-    this.mapTitle = this.add.text(18, 18, "夕凪町　18:42　β 0.49", {
+    this.mapTitle = this.add.text(18, 18, "夕凪町　18:42　β 0.50", {
       fontFamily: "serif", fontSize: "18px", color: "#fff4df",
       backgroundColor: "#2b243088", padding: { x:10, y:7 }
     }).setScrollFactor(0).setDepth(1000);
@@ -681,46 +682,36 @@ class WalkScene extends Phaser.Scene {
     let selectedRace=storedRace?.race_id ?? "";
 
     const raceLabel=document.createElement("div");
-    raceLabel.textContent=storedRace ? "種族" : "種族を選択";
+    raceLabel.textContent="種族";
     raceLabel.style.marginBottom="8px";
     const raceArea=document.createElement("div");
     raceArea.style.marginBottom="16px";
 
-    if(storedRace){
-      const fixed=document.createElement("div");
-      fixed.textContent=storedRace.name_ja;
-      Object.assign(fixed.style,{
-        padding:"12px",borderRadius:"10px",background:"#211e27",border:"1px solid rgba(255,255,255,.15)",
-        fontWeight:"700"
-      } as Partial<CSSStyleDeclaration>);
-      raceArea.appendChild(fixed);
-    }else{
-      Object.assign(raceArea.style,{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:"8px"} as Partial<CSSStyleDeclaration>);
-      const raceButtons:HTMLButtonElement[]=[];
-      for(const race of usableRaces){
-        const button=document.createElement("button");
-        button.type="button";
-        button.textContent=race.name_ja;
-        Object.assign(button.style,{
-          minHeight:"48px",borderRadius:"10px",background:"#211e27",color:"#fff8e8",fontSize:"13px",
-          fontWeight:"700",cursor:"pointer",border:"2px solid rgba(255,255,255,.15)"
-        } as Partial<CSSStyleDeclaration>);
-        button.onclick=()=>{
-          selectedRace=race.race_id;
-          raceButtons.forEach((item)=>item.style.border="2px solid rgba(255,255,255,.15)");
-          button.style.border="2px solid #fff";
-        };
-        raceButtons.push(button);
-        raceArea.appendChild(button);
-      }
-    }
+    Object.assign(raceArea.style,{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:"8px"} as Partial<CSSStyleDeclaration>);
+const raceButtons:HTMLButtonElement[]=[];
+for(const race of usableRaces){
+  const button=document.createElement("button");
+  button.type="button";
+  button.textContent=race.name_ja;
+  Object.assign(button.style,{
+    minHeight:"48px",borderRadius:"10px",background:"#211e27",color:"#fff8e8",fontSize:"13px",
+    fontWeight:"700",cursor:"pointer",border:selectedRace===race.race_id ? "2px solid #fff" : "2px solid rgba(255,255,255,.15)"
+  } as Partial<CSSStyleDeclaration>);
+  button.onclick=()=>{
+    selectedRace=race.race_id;
+    raceButtons.forEach((item)=>item.style.border="2px solid rgba(255,255,255,.15)");
+    button.style.border="2px solid #fff";
+  };
+  raceButtons.push(button);
+  raceArea.appendChild(button);
+}
 
     const statusLabel=document.createElement("label");
     statusLabel.textContent="ステータス";
     statusLabel.style.display="block";
     statusLabel.style.marginBottom="6px";
     const status=document.createElement("select");
-    for(const [value,label] of [["studying","勉強中"],["reading","読書中"],["busy","取り込み中"],["afk","AFK"]] as const){
+    for(const [value,label] of [["online","オンライン"],["studying","勉強中"],["reading","読書中"],["busy","取り込み中"],["afk","AFK"]] as const){
       const option=document.createElement("option");
       option.value=value;
       option.textContent=label;
@@ -793,7 +784,7 @@ class WalkScene extends Phaser.Scene {
       this.playerRace=race.value;
       this.playerHeight=1;
       this.playerColor=0x60a5fa;
-      this.presenceStatus="afk";
+      this.presenceStatus="online";
       onStart("");
     };
     start.onclick=begin;
@@ -1472,7 +1463,7 @@ class WalkScene extends Phaser.Scene {
       statusLabel.style.marginTop="18px";
       statusLabel.style.marginBottom="6px";
       statusSelect=document.createElement("select");
-      for(const [value,label] of [["studying","勉強中"],["reading","読書中"],["busy","取り込み中"],["afk","AFK"]] as const){
+      for(const [value,label] of [["online","オンライン"],["studying","勉強中"],["reading","読書中"],["busy","取り込み中"],["afk","AFK"]] as const){
         const option=document.createElement("option");
         option.value=value;option.textContent=label;statusSelect.appendChild(option);
       }
@@ -1555,9 +1546,9 @@ class WalkScene extends Phaser.Scene {
 
   private updateMapTitle() {
     this.mapTitle?.setText(
-      this.currentMap==="yunagicho" ? "夕凪町　18:42　β 0.49" :
-      this.currentMap==="komorebi" ? "木漏れ日神社　β 0.49" :
-      "コンビニ　β 0.49"
+      this.currentMap==="yunagicho" ? "夕凪町　18:42　β 0.50" :
+      this.currentMap==="komorebi" ? "木漏れ日神社　β 0.50" :
+      "コンビニ　β 0.50"
     );
   }
 

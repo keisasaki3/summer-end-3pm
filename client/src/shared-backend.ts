@@ -1,6 +1,6 @@
 import { createClient, type Session, type SupabaseClient, type User } from "@supabase/supabase-js";
 
-export type PresenceStatus = "studying" | "reading" | "busy" | "afk";
+export type PresenceStatus = "online" | "studying" | "reading" | "busy" | "afk";
 
 export type SharedProfile = {
   user_id: string;
@@ -129,9 +129,9 @@ export async function loadPresenceStatus(userId: string): Promise<PresenceStatus
     .maybeSingle();
   if (error) throw error;
   const status = data?.status;
-  return status === "studying" || status === "reading" || status === "busy" || status === "afk"
+  return status === "online" || status === "studying" || status === "reading" || status === "busy" || status === "afk"
     ? status
-    : "afk";
+    : "online";
 }
 
 export async function savePresenceStatus(userId: string, status: PresenceStatus): Promise<void> {

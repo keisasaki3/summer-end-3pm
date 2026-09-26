@@ -1,6 +1,6 @@
 # 午後三時、夏の果。 — Implementation Handoff
 
-更新: 2026-09-26 / β 0.49
+更新: 2026-09-26 / β 0.50
 
 ## Read first
 
