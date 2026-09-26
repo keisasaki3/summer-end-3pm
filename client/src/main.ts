@@ -90,10 +90,12 @@ class WalkScene extends Phaser.Scene {
   private transitionLock = false;
   private activeMapBgm?: Phaser.Sound.BaseSound;
   private activeMapAmbience: Phaser.Sound.BaseSound[] = [];
+  private masterVolume = Math.min(1, Math.max(0, Number(localStorage.getItem("summer-end-3pm-master-volume") ?? "1")));
 
   // 今後、環境音/BGMファイルを追加したらここへ key -> URL を登録する。
   private readonly audioAssets: Record<string,string> = {
     "yunagicho-perves-village": "/audio/yunagicho-perves-village-587370.mp3",
+    "komorebi-cicadas-birds": "/audio/komorebi-cicadas-birds-275634.mp3",
     "convenience-night-ambience": "/audio/convenience-night-ambience-17064.mp3"
   };
 
@@ -113,7 +115,7 @@ class WalkScene extends Phaser.Scene {
     },
     komorebi: {
       name:"木漏れ日神社", texture:"komorebi-field", quiz:false,
-      audio:{ bgmKey:null, ambienceKeys:[] }
+      audio:{ bgmKey:"komorebi-cicadas-birds", ambienceKeys:[] }
     },
     convenience: {
       name:"コンビニ", texture:"convenience-field", quiz:false,
@@ -223,7 +225,7 @@ class WalkScene extends Phaser.Scene {
     void this.setupLogin();
     this.setupCollisionMap();
 
-    this.mapTitle = this.add.text(18, 18, "夕凪町　18:42　β 0.52", {
+    this.mapTitle = this.add.text(18, 18, "夕凪町　18:42　β 0.53", {
       fontFamily: "serif", fontSize: "18px", color: "#fff4df",
       backgroundColor: "#2b243088", padding: { x:10, y:7 }
     }).setScrollFactor(0).setDepth(1000);
@@ -748,7 +750,7 @@ for(const race of usableRaces){
 
     wrap.append(nameLabel,nameInput,raceLabel,raceArea,statusLabel,status,start);
     panel.appendChild(wrap);
-    setMessage(storedRace ? "共通プロフィールを確認して散歩を始めます。" : "最初に共通種族を選んでください。");
+    setMessage("なつめポータル共通のプロフィールです");
   }
 
   private renderLegacyLogin(panel:HTMLDivElement,onStart:(accessToken:string)=>void) {
@@ -1328,13 +1330,13 @@ for(const race of usableRaces){
     const config=this.mapData[this.currentMap].audio;
 
     if(config.bgmKey && this.cache.audio.exists(config.bgmKey)){
-      this.activeMapBgm=this.sound.add(config.bgmKey,{loop:true,volume:1});
+      this.activeMapBgm=this.sound.add(config.bgmKey,{loop:true,volume:this.masterVolume});
       this.activeMapBgm.play();
     }
 
     for(const key of config.ambienceKeys){
       if(!this.cache.audio.exists(key)) continue;
-      const sound=this.sound.add(key,{loop:true,volume:1});
+      const sound=this.sound.add(key,{loop:true,volume:this.masterVolume});
       sound.play();
       this.activeMapAmbience.push(sound);
     }
@@ -1458,6 +1460,29 @@ for(const race of usableRaces){
     coordsLabel.append(coords,coordsText);
     box.append(heading,coordsLabel);
 
+    const volumeLabel=document.createElement("label");
+    Object.assign(volumeLabel.style,{display:"block",marginTop:"18px",marginBottom:"6px"} as Partial<CSSStyleDeclaration>);
+    const volumeText=document.createElement("span");
+    const volumeValue=document.createElement("span");
+    volumeText.textContent="音量";
+    volumeValue.textContent=` ${Math.round(this.masterVolume*100)}%`;
+    volumeLabel.append(volumeText,volumeValue);
+    const volume=document.createElement("input");
+    volume.type="range";
+    volume.min="0";
+    volume.max="100";
+    volume.step="1";
+    volume.value=String(Math.round(this.masterVolume*100));
+    Object.assign(volume.style,{width:"100%",margin:"0 0 2px"} as Partial<CSSStyleDeclaration>);
+    volume.addEventListener("input",()=>{
+      this.masterVolume=Math.min(1,Math.max(0,Number(volume.value)/100));
+      volumeValue.textContent=` ${Math.round(this.masterVolume*100)}%`;
+      localStorage.setItem("summer-end-3pm-master-volume",String(this.masterVolume));
+      this.activeMapBgm?.setVolume(this.masterVolume);
+      for(const sound of this.activeMapAmbience) sound.setVolume(this.masterVolume);
+    });
+    box.append(volumeLabel,volume);
+
     let statusSelect:HTMLSelectElement|undefined;
     if(sharedBackendEnabled && this.authUserId){
       const statusLabel=document.createElement("label");
@@ -1505,7 +1530,16 @@ for(const race of usableRaces){
     yunagiCreditLink.rel="noopener noreferrer";
     yunagiCreditLink.textContent="Freesound";
     Object.assign(yunagiCreditLink.style,{color:"#fff",opacity:".9"} as Partial<CSSStyleDeclaration>);
-    credits.append(creditTitle,creditLink,yunagiCreditTitle,yunagiCreditLink);
+    const komorebiCreditTitle=document.createElement("div");
+    komorebiCreditTitle.style.marginTop="8px";
+    komorebiCreditTitle.textContent="BGM: Cicadas + Birds — kvgarlic / Freesound";
+    const komorebiCreditLink=document.createElement("a");
+    komorebiCreditLink.href="https://freesound.org/people/kvgarlic/sounds/275634/";
+    komorebiCreditLink.target="_blank";
+    komorebiCreditLink.rel="noopener noreferrer";
+    komorebiCreditLink.textContent="Freesound";
+    Object.assign(komorebiCreditLink.style,{color:"#fff",opacity:".9"} as Partial<CSSStyleDeclaration>);
+    credits.append(creditTitle,creditLink,yunagiCreditTitle,yunagiCreditLink,komorebiCreditTitle,komorebiCreditLink);
     box.appendChild(credits);
 
     const actions=document.createElement("div");
@@ -1571,9 +1605,9 @@ for(const race of usableRaces){
 
   private updateMapTitle() {
     this.mapTitle?.setText(
-      this.currentMap==="yunagicho" ? "夕凪町　18:42　β 0.52" :
-      this.currentMap==="komorebi" ? "木漏れ日神社　β 0.52" :
-      "コンビニ　β 0.52"
+      this.currentMap==="yunagicho" ? "夕凪町　18:42　β 0.53" :
+      this.currentMap==="komorebi" ? "木漏れ日神社　β 0.53" :
+      "コンビニ　β 0.53"
     );
   }
 

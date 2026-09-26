@@ -1,6 +1,6 @@
 # 午後三時、夏の果て — 実装仕様（現行）
 
-更新: 2026-09-26 / β 0.52
+更新: 2026-09-26 / β 0.53
 
 ## 1. 作品
 
@@ -188,3 +188,7 @@ Shared World Core統合を変更する場合は少なくとも次を確認する
 - 夕凪町BGM: **Perves Ambient Mountains Distant Small Village** — jordir / Freesound
 - Source: https://freesound.org/people/jordir/sounds/587370/
 - License: CC0
+
+
+- 木漏れ日神社BGM: **Cicadas + Birds** — kvgarlic / Freesound
+- Source: https://freesound.org/people/kvgarlic/sounds/275634/

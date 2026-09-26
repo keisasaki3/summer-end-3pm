@@ -1,4 +1,4 @@
-# 午後三時、夏の果て β 0.52
+# 午後三時、夏の果て β 0.53
 
 「みんなで歩けるだけ」の最小オンライン散歩空間。
 
@@ -457,3 +457,7 @@ Late Summer at the Pier を夕凪町BGMとしてループ再生。ログイン�
 - 夕凪町BGM: **Perves Ambient Mountains Distant Small Village** — jordir / Freesound
 - Source: https://freesound.org/people/jordir/sounds/587370/
 - License: CC0
+
+
+- 木漏れ日神社BGM: **Cicadas + Birds** — kvgarlic / Freesound
+- Source: https://freesound.org/people/kvgarlic/sounds/275634/
