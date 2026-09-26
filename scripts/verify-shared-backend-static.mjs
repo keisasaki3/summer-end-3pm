@@ -27,7 +27,7 @@ const checks={
   reconnect_backoff:main.includes("1000*Math.pow(2,this.reconnectAttempts)") && main.includes(",8000"),
   all_maps:["yunagicho","komorebi","convenience"].every(x=>main.includes(x) && server.includes(x)),
   chat:/type\s*:\s*["']chat["']/.test(main) && /msg\.type\s*===\s*["']chat["']/.test(server),
-  y_sort:depth.includes("10 + child.y + bias"),
+  y_sort:depth.includes("players.sort((a, b)") && depth.includes("const dy = a.y - b.y") && depth.includes("a === localPlayer") && depth.includes("PLAYER_DEPTH_BASE + index * PLAYER_DEPTH_STEP"),
   service_role_server_only:serverShared.includes("SUPABASE_SERVICE_ROLE_KEY") && !main.includes("SUPABASE_SERVICE_ROLE_KEY") && !shared.includes("SUPABASE_SERVICE_ROLE_KEY"),
   fixed_height:server.includes("player.height = 1") && !main.includes('selectedHeight'),
   status_server_write:server.includes("setPresenceStatus(player.id, nextStatus)"),
