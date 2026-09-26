@@ -1,0 +1,210 @@
+function serializePlayer(player) {
+  return {
+    id: player.id,
+    x: player.x,
+    y: player.y,
+    color: player.color,
+    name: player.name,
+    height: player.height,
+    map: player.map,
+    race: player.race,
+    direction: player.direction,
+    status: player.status,
+  };
+}
+
+function visiblePlayers(map, excludeId) {
+  return [...players.values()]
+    .filter((player) => player.id !== excludeId && player.map === map)
+    .map(serializePlayer);
+}
+
+function markStateDirty(player) {
+  if (!player.authenticated) return;
+  player.stateRevision += 1;
+  player.stateDirty = true;
+}
+
+async function persistPlayerState(player, force = false) {
+  if (!sharedBackend.enabled || !player.authenticated) return true;
+  const now = Date.now();
+  if (!force) {
+    if (!player.stateDirty) return true;
+    if (now - player.lastSavedAt < PLAYER_SNAPSHOT_INTERVAL_MS) return true;
+  }
+
+  if (player.stateSavePromise) {
+    if (!force) return true;
+    await player.stateSavePromise;
+    if (!player.stateDirty) return true;
+  }
+
+  const revision = player.stateRevision;
+  const snapshot = {
+    map: player.map,
+    x: player.x,
+    y: player.y,
+    direction: player.direction,
+  };
+
+  const run = (async () => {
+    try {
+      await sharedBackend.saveSummerState(player.id, snapshot);
+      player.lastSavedAt = Date.now();
+      if (player.stateRevision === revision) player.stateDirty = false;
+      return true;
+    } catch (error) {
+      console.error("[shared-backend] state save failed", player.id, error);
+      return false;
+    }
+  })();
+  player.stateSavePromise = run;
+  try {
+    const result = await run;
+    if (force && result && player.stateDirty && player.stateRevision !== revision) {
+      player.stateSavePromise = null;
+      return persistPlayerState(player, true);
+    }
+    return result;
+  } finally {
+    if (player.stateSavePromise === run) player.stateSavePromise = null;
+  }
+}
+
+function touchPlayerPresence(player) {
+  if (!sharedBackend.enabled || !player.authenticated) return;
+  const now = Date.now();
+  if (now - player.lastPresenceTouchAt < PRESENCE_TOUCH_INTERVAL_MS) return;
+  player.lastPresenceTouchAt = now;
+  void sharedBackend.touchPresence(player.id, player.status).catch((error) => {
+    console.error("[shared-backend] presence touch failed", player.id, error);
+  });
+}
+
+function serveStatic(req, res) {
+  if (DEV) {
+    res.writeHead(200, { "Content-Type": "text/plain; charset=utf-8" });
+    res.end("午後三時、夏の果。 WebSocket dev server");
+    return;
+  }
+
+  const dist = path.join(__dirname, "..", "dist");
+  const urlPath = decodeURIComponent((req.url || "/").split("?")[0]);
+  let filePath = path.join(dist, urlPath === "/" ? "index.html" : urlPath);
+
+  // Prevent traversal outside dist.
+  const normalizedDist = path.resolve(dist);
+  filePath = path.resolve(filePath);
+  if (!filePath.startsWith(normalizedDist)) {
+    res.writeHead(403);
+    res.end("Forbidden");
+    return;
+  }
+
+  fs.stat(filePath, (err, stat) => {
+    if (!err && stat.isFile()) {
+      const ext = path.extname(filePath).toLowerCase();
+      res.writeHead(200, {
+        "Content-Type": MIME[ext] || "application/octet-stream",
+        "Cache-Control": ext === ".html" ? "no-cache" : "public, max-age=3600",
+      });
+      fs.createReadStream(filePath).pipe(res);
+      return;
+    }
+
+    // SPA fallback.
+    const indexPath = path.join(dist, "index.html");
+    fs.readFile(indexPath, (indexErr, data) => {
+      if (indexErr) {
+        res.writeHead(503, { "Content-Type": "text/plain; charset=utf-8" });
+        res.end("Build not found. Run: npm run build");
+        return;
+      }
+      res.writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-cache" });
+      res.end(data);
+    });
+  });
+}
+
+const server = http.createServer(serveStatic);
+const wss = new WebSocketServer({ server });
+
+wss.on("connection", (socket) => {
+  socket.isAlive = true;
+  socket.on("pong",()=>{ socket.isAlive = true; });
+
+  const connectionId = Math.random().toString(36).slice(2, 10);
+  let joined = false;
+  let joining = false;
+  socket.playerId = connectionId;
+
+  const player = {
+    id: connectionId,
+    x: 820 + Math.floor(Math.random() * 80),
+    y: 520 + Math.floor(Math.random() * 80),
+    color: 0x60a5fa,
+    name: "WALKER",
+    height: 1,
+    money: 0,
+    map: "yunagicho",
+    race: "teddy",
+    direction: "down",
+    status: "afk",
+    authenticated: false,
+    stateDirty: false,
+    stateRevision: 0,
+    lastSavedAt: Date.now(),
+    lastPresenceTouchAt: 0,
+    stateSavePromise: null,
+  };
+
+  socket.on("message", async (raw) => {
+    let msg;
+    try {
+      msg = JSON.parse(String(raw));
+    } catch {
+      return;
+    }
+
+    if (msg.type === "join" && !joined && !joining) {
+      joining = true;
+      try {
+        if (sharedBackend.enabled) {
+          const user = await sharedBackend.verifyAccessToken(msg.accessToken);
+          const bootstrap = await sharedBackend.loadBootstrap(user.id);
+          const previousPlayer = players.get(user.id);
+
+          player.id = user.id;
+          player.authenticated = true;
+          player.name = String(bootstrap.profile.display_name || "名無し").slice(0, 20);
+          player.race = bootstrap.profile.race_id;
+          player.height = 1;
+          player.color = 0x60a5fa;
+          player.status = sharedBackend.normalizeStatus(bootstrap.status);
+          player.direction = "down";
+
+          const resumeFromClient = Boolean(msg.resume) && Number.isFinite(msg.x) && Number.isFinite(msg.y);
+          if (resumeFromClient) {
+            player.map = normalizeMap(msg.map, "yunagicho");
+            player.x = clampX(msg.x);
+            player.y = clampY(msg.y);
+            player.direction = normalizeDirection(msg.direction, "down");
+            markStateDirty(player);
+          } else if (previousPlayer && previousPlayer.authenticated) {
+            // New socket wins duplicate-account races without rolling the player
+            // back to an older DB snapshot.
+            player.map = normalizeMap(previousPlayer.map, "yunagicho");
+            player.x = clampX(previousPlayer.x);
+            player.y = clampY(previousPlayer.y);
+            player.direction = normalizeDirection(previousPlayer.direction, "down");
+            markStateDirty(player);
+          } else if (bootstrap.state && hasFinitePosition(bootstrap.state)) {
+            player.map = normalizeMap(bootstrap.state.map_id, "yunagicho");
+            player.x = clampX(bootstrap.state.x);
+            player.y = clampY(bootstrap.state.y);
+            player.direction = normalizeDirection(bootstrap.state.direction, "down");
+          }
+
+          const oldSocket = activeSockets.get(player.id);
+          socket.playerId = player.id;
+          activeSockets.set(player.id, socket);
