@@ -13,6 +13,7 @@ const clamp01 = (value: number) => Math.min(1, Math.max(0, value));
 const LOOP_OVERLAP_SECONDS = 5.0;
 const CROSSFADE_MS = 4000;
 const LOOP_MONITOR_MS = 100;
+const HALF_PI = Math.PI / 2;
 
 // Phaser's HTML5 Audio loader creates one HTMLAudioElement per key by default.
 // A real crossfade needs two physical elements playing the same key at once,
@@ -113,8 +114,13 @@ if (html5ManagerProto && !html5ManagerProto.__summerEndSeamlessLoopPatched) {
         setChildVolume(1 - activeIndex, 0);
         return;
       }
-      setChildVolume(activeIndex, target * (1 - fadeProgress));
-      setChildVolume(nextIndex, target * fadeProgress);
+
+      // Equal-power crossfade: unlike a linear 50/50 fade, this keeps perceived
+      // power roughly constant through the middle instead of producing a dip.
+      const oldGain = Math.cos(fadeProgress * HALF_PI);
+      const newGain = Math.sin(fadeProgress * HALF_PI);
+      setChildVolume(activeIndex, target * oldGain);
+      setChildVolume(nextIndex, target * newGain);
     };
 
     const finishCrossfade = () => {
@@ -130,17 +136,25 @@ if (html5ManagerProto && !html5ManagerProto.__summerEndSeamlessLoopPatched) {
     };
 
     const beginCrossfade = () => {
-      if (!running || crossfading) return;
+      if (!running || crossfading) return false;
       nextIndex = 1 - activeIndex;
       const next = sounds[nextIndex];
-      if (!next) return;
+      if (!next) return false;
 
       next.stop?.();
       setChildVolume(nextIndex, 0);
-      next.play?.();
+
+      // Do not fade the current track until the standby track has actually
+      // started. If HTML5 Audio cannot allocate/start it yet, monitor() retries
+      // every 100ms while the current track keeps playing at full level.
+      const started = next.play?.() === true;
+      if (!started) return false;
+
       crossfading = true;
       fadeStartedAt = performance.now();
       fadeProgress = 0;
+      applyCurrentVolumes();
+      return true;
     };
 
     const recoverFromUnexpectedEnd = (endedIndex: number) => {
@@ -154,13 +168,18 @@ if (html5ManagerProto && !html5ManagerProto.__summerEndSeamlessLoopPatched) {
       }
 
       // Fallback for aggressive browser timer throttling: if the overlap check
-      // missed the window completely, start the standby copy immediately.
+      // missed the window completely, start the standby copy immediately. Only
+      // switch ownership after play() confirms that the standby copy started.
       nextIndex = 1 - activeIndex;
       const next = sounds[nextIndex];
       if (!next) return;
       next.stop?.();
       setChildVolume(nextIndex, targetVolume());
-      next.play?.();
+      const started = next.play?.() === true;
+      if (!started) {
+        setChildVolume(nextIndex, 0);
+        return;
+      }
       activeIndex = nextIndex;
       nextIndex = 1 - activeIndex;
     };
@@ -249,6 +268,37 @@ if (html5ManagerProto && !html5ManagerProto.__summerEndSeamlessLoopPatched) {
 
   html5ManagerProto.__summerEndSeamlessLoopPatched = true;
 }
+
+// The Phaser map title occupies the upper-left corner of the game canvas. The
+// money HUD is created later by main.ts as a fixed DOM element, so move it into
+// the upper-right HUD stack after login instead of letting both occupy ~14px/14px.
+const positionMoneyHud = () => {
+  const hud = Array.from(document.body.children).find(
+    (child): child is HTMLDivElement =>
+      child instanceof HTMLDivElement && (child.textContent ?? "").startsWith("所持金")
+  );
+  if (!hud) return false;
+
+  Object.assign(hud.style, {
+    left: "auto",
+    right: "14px",
+    top: "96px",
+    maxWidth: "calc(100vw - 28px)",
+    boxSizing: "border-box",
+  } as Partial<CSSStyleDeclaration>);
+  return true;
+};
+
+const installMoneyHudLayout = () => {
+  if (positionMoneyHud()) return;
+  const observer = new MutationObserver(() => {
+    if (positionMoneyHud()) observer.disconnect();
+  });
+  observer.observe(document.body, { childList: true, subtree: true, characterData: true });
+};
+
+if (document.body) installMoneyHudLayout();
+else window.addEventListener("DOMContentLoaded", installMoneyHudLayout, { once: true });
 
 const OriginalGame = phaserRuntime.Game;
 
