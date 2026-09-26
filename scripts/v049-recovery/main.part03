@@ -1,0 +1,430 @@
+      border: "1px solid rgba(255,255,255,.35)",
+      borderRadius: "12px",
+      background: "rgba(34,29,38,.88)",
+      color: "#fff7e8",
+      fontSize: "16px",
+      padding: "0 14px",
+      outline: "none",
+      zIndex: "10000"
+    } as Partial<CSSStyleDeclaration>);
+
+    const disableGameKeys = () => {
+      if(this.chatLog){this.chatLog.style.background="rgba(13,16,22,.68)";this.chatLog.style.opacity="1";}
+      if (this.input.keyboard) {
+        this.input.keyboard.resetKeys();
+        this.input.keyboard.enabled = false;
+      }
+      this.joystick.active = false;
+      this.joystick.dx = 0;
+      this.joystick.dy = 0;
+    };
+
+    const enableGameKeys = () => {
+      if(this.chatLog){this.chatLog.style.background="rgba(13,16,22,.42)";this.chatLog.style.opacity=".86";}
+      if (this.input.keyboard) {
+        this.input.keyboard.resetKeys();
+        this.input.keyboard.enabled = true;
+      }
+    };
+
+    const focusChat = () => {
+      disableGameKeys();
+      input.focus({ preventScroll: true });
+    };
+
+    const leaveChat = () => {
+      input.blur();
+      enableGameKeys();
+    };
+
+    // Capture Enter before Phaser can act on it.
+    window.addEventListener("keydown", (e) => {
+      if (this.loginOpen) return;
+      if (e.key === "Enter" && document.activeElement !== input) {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        focusChat();
+      }
+    }, true);
+
+    input.addEventListener("focus", disableGameKeys);
+    input.addEventListener("blur", () => {
+      if (!this.loginOpen) enableGameKeys();
+    });
+
+    // Stop keyboard events at the DOM input so WASD/arrow keys are guaranteed to type.
+    for (const eventName of ["keydown", "keyup", "keypress"] as const) {
+      input.addEventListener(eventName, (e) => {
+        e.stopPropagation();
+      });
+    }
+
+    input.addEventListener("keydown", (e) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        leaveChat();
+        return;
+      }
+
+      if (e.key !== "Enter") return;
+
+      e.preventDefault();
+      e.stopImmediatePropagation();
+
+      const text = input.value.trim();
+      if (text && this.me) {
+        this.showBubble(this.me, text);
+        this.addChatLog(this.playerName,text);
+        if (this.socket?.readyState === WebSocket.OPEN) {
+          this.socket.send(JSON.stringify({ type: "chat", text }));
+        }
+        input.value = "";
+      }
+
+      leaveChat();
+    });
+
+    document.body.appendChild(input);
+    this.chatInput = input;
+  }
+
+
+  private setupCollisionMap() {
+    this.rectBlockers=[]; this.circleBlockers=[]; this.polygonBlockers=[];
+    const P=(pts:number[][])=>this.polygonBlockers.push(new Phaser.Geom.Polygon(pts.flat()));
+    if(this.currentMap==="yunagicho"){
+      // 左上の神社周辺は当たり判定を大きく撤去。鳥居～階段～上端を自由に通行可能。
+      // Main shop block ("浦のや") and attached frontage; sidewalk edge left open.
+    P([[346,126],[710,126],[745,213],[732,354],[699,426],[650,454],[557,464],[470,451],[402,417],[362,353]]);
+
+    // Deep center-left/center houses bordering the narrow northbound lane.
+    P([[620,0],[936,0],[940,176],[900,207],[862,255],[825,325],[790,390],[752,431],[718,417],[740,315],[748,211],[714,131]]);
+
+    // Newspaper office / greenery / bus-stop island. Road around it remains open.
+    P([[948,0],[1290,0],[1300,135],[1278,219],[1263,305],[1250,367],[1217,416],[1173,461],[1094,478],[1017,465],[994,405],[1004,323],[1007,217],[970,142]]);
+    // Bus shelter itself
+    P([[1090,349],[1282,344],[1300,431],[1271,474],[1111,478],[1084,442]]);
+
+    // Far-right sea / breakwater beyond waterfront road.
+    P([[1412,0],[1536,0],[1536,497],[1490,489],[1462,448],[1447,385],[1433,303],[1421,214]]);
+    // Right edge sea below waterfront railing
+    P([[1484,462],[1536,449],[1536,864],[1378,864],[1396,746],[1438,660],[1468,563]]);
+
+    // Bottom-left foreground houses, walls and planting.
+    P([[0,558],[88,572],[170,613],[242,651],[322,682],[389,704],[405,864],[0,864]]);
+    P([[258,676],[474,679],[516,733],[526,864],[386,864],[382,742]]);
+
+    // Bottom-center garden/wall: keeps only the road descending to bridge open.
+    // 真ん中下の道路はコンビニへの通路として開放。
+
+    // Canal/bridge left parapet and lower-right water mass.
+    P([[958,638],[1060,609],[1192,574],[1334,543],[1392,552],[1382,614],[1302,637],[1198,667],[1082,699],[1018,722]]);
+    // X927〜1208 / Y848周辺はコンビニ往復用の道路として完全開放。
+
+    // Small solid objects on otherwise walkable pavement.
+    P([[391,630],[419,630],[424,700],[390,701]]); // utility post
+    P([[985,453],[1045,446],[1060,495],[1004,505]]); // flower/stop island
+    } else if(this.currentMap==="komorebi") {
+      // 木漏れ日神社: 中央参道・拝殿前広場・右参道・手水舎周辺を歩行可能に。
+      P([[0,0],[145,0],[148,190],[202,254],[250,309],[286,386],[246,454],[0,454]]);
+      P([[148,0],[545,0],[562,112],[530,224],[480,325],[426,430],[340,474],[276,414],[303,324],[350,228],[390,116]]);
+      P([[555,0],[1110,0],[1130,82],[1082,148],[1045,252],[1025,325],[970,350],[908,319],[872,281],[748,283],[697,318],[620,333],[555,285]]);
+      P([[1110,0],[1536,0],[1536,270],[1460,281],[1400,312],[1350,353],[1307,411],[1248,405],[1260,319],[1300,226],[1330,120]]);
+      // 拝殿本体
+      P([[748,82],[1105,78],[1127,257],[1080,305],[790,303],[744,260]]);
+      // 絵馬掛け
+      P([[506,308],[690,307],[704,448],[510,452]]);
+      // 手水舎
+      P([[116,256],[433,244],[456,468],[355,515],[167,505],[112,440]]);
+      // 右端社務所
+      P([[1470,286],[1536,270],[1536,655],[1460,646]]);
+      // 下部植栽・柵。中央の南参道は出口として開ける。
+      P([[0,555],[220,545],[354,574],[492,633],[630,700],[704,764],[704,864],[0,864]]);
+      P([[944,691],[1100,648],[1260,616],[1435,604],[1536,620],[1536,864],[946,864]]);
+      // 左下の灯籠・植栽島
+      P([[214,515],[381,508],[437,569],[409,654],[250,670],[190,607]]);
+      // 右下ベンチ・植栽
+      P([[1168,631],[1455,612],[1474,730],[1380,778],[1200,756]]);
+    } else {
+      // コンビニ: 駐車場を主な歩行エリアにする。
+      P([[410,255],[1115,255],[1115,510],[410,510]]); // 店舗本体
+      P([[175,430],[310,425],[325,555],[180,555]]);  // 車
+      P([[335,390],[405,390],[410,525],[335,525]]);  // 左設備
+      P([[1190,405],[1435,405],[1445,585],[1185,585]]); // 自販機・ゴミ箱
+      P([[0,0],[150,0],[170,420],[145,620],[0,650]]);
+      P([[1460,0],[1536,0],[1536,650],[1460,620]]);
+    }
+  }
+
+  private isBlocked(x:number,y:number,r=10) {
+    if(x<16||x>1520)return true;
+    // 夕凪町コンビニ接続道路: 指定範囲周辺は一切の当たり判定を持たせない。
+    // 下端だけでなく少し上まで開け、帰還スポーン後に確実に移動できるようにする。
+    if(this.currentMap==="yunagicho" && x>=927 && x<=1208 && y>=760) return false;
+    if(this.currentMap==="yunagicho"){
+      if(y>848 && !(x>=1012&&x<=1140)) return true;
+      if(y<16)return true;
+      if(y<80 && !(x>=70&&x<=300)) return true;
+    }else if(this.currentMap==="komorebi"){
+      if(y<16)return true;
+      if(y>848 && !(x>=720&&x<=930)) return true;
+    }else{
+      if(y<16)return true;
+      if(y>848 && !(x>=1376&&x<=1504)) return true;
+    }
+    const hit=new Phaser.Geom.Circle(x,y,r);
+    for(const rect of this.rectBlockers)if(Phaser.Geom.Intersects.CircleToRectangle(hit,rect))return true;
+    for(const c of this.circleBlockers){const d=r+c.radius,dx=x-c.x,dy=y-c.y;if(dx*dx+dy*dy<d*d)return true;}
+    const samples=[[x,y],[x-r,y],[x+r,y],[x,y-r],[x,y+r]];
+    for(const poly of this.polygonBlockers)if(samples.some(([px,py])=>Phaser.Geom.Polygon.Contains(poly,px,py)))return true;
+    return false;
+  }
+
+  private tryMovePlayer(dx:number,dy:number,delta:number) {
+    if(!this.me)return;
+    const speed=this.getRaceData(this.playerRace).moveSpeed;
+    const step=speed*delta/1000;
+    const nx=Phaser.Math.Clamp(this.me.x+dx*step,16,1520),ny=Phaser.Math.Clamp(this.me.y+dy*step,80,848);
+    if(!this.isBlocked(nx,this.me.y))this.me.x=nx;
+    if(!this.isBlocked(this.me.x,ny))this.me.y=ny;
+  }
+
+  private clearOtherPlayers() {
+    for(const other of this.others.values()) other.destroy(true);
+    this.others.clear();
+  }
+
+  private syncOtherPlayers(players:PlayerState[]) {
+    const visibleIds=new Set<string>();
+    for(const p of players){
+      if(p.id===this.meId) continue;
+      visibleIds.add(p.id);
+      const direction=this.normalizeDirection(p.direction);
+      const status=this.normalizeStatus(p.status);
+      const race=p.race||"teddy";
+      let other=this.others.get(p.id);
+
+      if(other && String(other.getData("race")||"teddy")!==race){
+        other.destroy(true);
+        this.others.delete(p.id);
+        other=undefined;
+      }
+
+      if(!other){
+        other=this.makePlayer(p.x,p.y,p.color,p.name,p.height,race,direction,status);
+        this.others.set(p.id,other);
+      }else{
+        other.setPosition(p.x,p.y);
+        this.updatePlayerIdentity(other,p.name,status,direction);
+      }
+    }
+
+    for(const [id,other] of this.others){
+      if(!visibleIds.has(id)){
+        other.destroy(true);
+        this.others.delete(id);
+      }
+    }
+  }
+
+  private stopHeartbeat() {
+    if(this.heartbeatTimer!==undefined){
+      window.clearInterval(this.heartbeatTimer);
+      this.heartbeatTimer=undefined;
+    }
+  }
+
+  private startHeartbeat(socket:WebSocket) {
+    this.stopHeartbeat();
+    this.lastHeartbeatAck=performance.now();
+    const send=()=>{
+      if(this.socket!==socket || socket.readyState!==WebSocket.OPEN) return;
+      if(performance.now()-this.lastHeartbeatAck>45000){
+        socket.close();
+        return;
+      }
+      socket.send(JSON.stringify({type:"heartbeat"}));
+    };
+    send();
+    this.heartbeatTimer=window.setInterval(send,12000);
+  }
+
+  private scheduleReconnect() {
+    if(this.loginOpen || this.reconnectTimer!==undefined) return;
+    const delay=Math.min(1000*Math.pow(2,this.reconnectAttempts),8000);
+    this.reconnectAttempts=Math.min(this.reconnectAttempts+1,3);
+    this.reconnectTimer=window.setTimeout(()=>{
+      this.reconnectTimer=undefined;
+      this.connect();
+    },delay);
+  }
+
+  private connect() {
+    if(this.socket && (this.socket.readyState===WebSocket.OPEN || this.socket.readyState===WebSocket.CONNECTING)) return;
+
+    const socket=new WebSocket(SERVER_URL);
+    this.socket=socket;
+
+    socket.addEventListener("open",()=>void(async()=>{
+      if(this.socket!==socket) return;
+      this.reconnectAttempts=0;
+
+      let accessToken=this.accessToken;
+      if(sharedBackendEnabled && supabase){
+        try{
+          const session=await getCurrentSession();
+          if(!session)throw new Error("認証セッションが切れました。");
+          accessToken=session.access_token;
+          this.accessToken=accessToken;
+        }catch(error){
+          console.error(error);
+          socket.close();
+          return;
+        }
+      }
+
+      const direction=this.me
+        ? this.normalizeDirection(this.me.getData("direction"))
+        : "down";
+
+      socket.send(JSON.stringify({
+        type:"join",
+        accessToken,
+        resume:Boolean(this.me),
+        name:this.playerName,
+        color:this.playerColor,
+        height:1,
+        race:this.playerRace,
+        status:this.presenceStatus,
+        map:this.currentMap,
+        x:this.me ? Math.round(this.me.x) : undefined,
+        y:this.me ? Math.round(this.me.y) : undefined,
+        direction
+      }));
+      this.startHeartbeat(socket);
+    })());
+
+    socket.addEventListener("message",(event)=>{
+      if(this.socket!==socket) return;
+      let msg:any;
+      try{ msg=JSON.parse(String(event.data)); }catch{ return; }
+
+      if(msg.type==="auth_error"){
+        console.error("Shared backend auth error:",msg.code||msg.message||"unknown");
+        this.stopHeartbeat();
+        this.loginOpen=true;
+        socket.close();
+        if(sharedBackendEnabled){
+          window.alert(msg.message || "認証に失敗しました。もう一度ログインしてください。");
+          void signOutShared().finally(()=>window.location.reload());
+        }
+        return;
+      }
+
+      if(msg.type==="heartbeat_ack"){
+        this.lastHeartbeatAck=performance.now();
+        if(msg.map===this.currentMap && Array.isArray(msg.players)){
+          this.syncOtherPlayers(msg.players as PlayerState[]);
+        }
+        return;
+      }
+
+      if(msg.type==="welcome"){
+        if(sharedBackendEnabled && msg.authMode!=="supabase"){
+          console.error("Shared backend misconfiguration: client auth is enabled but server auth is not.");
+          window.alert("共有バックエンドのサーバー設定が未完了です。管理者に連絡してください。");
+          this.loginOpen=true;
+          socket.close();
+          return;
+        }
+
+        this.meId=String(msg.id);
+        const p=msg.player as PlayerState;
+        this.playerName=p.name;
+        this.playerRace=p.race||"teddy";
+        this.playerHeight=1;
+        this.playerColor=p.color;
+        this.presenceStatus=this.normalizeStatus(p.status);
+        if(p.map) this.currentMap=p.map;
+
+        if(this.me) this.me.destroy(true);
+        this.me=this.makePlayer(
+          p.x,p.y,p.color,p.name,1,p.race||"teddy",
+          this.normalizeDirection(p.direction),this.presenceStatus
+        );
+        this.background?.setTexture(this.mapData[this.currentMap].texture);
+        this.background?.setDisplaySize(1536,864);
+        this.setupCollisionMap();
+        this.applyMapAudio();
+        this.updateMapTitle();
+        this.cameras.main.startFollow(this.me,true,.08,.08);
+        this.cameras.main.setBounds(0,0,1536,864);
+        return;
+      }
+
+      if(msg.type==="map_snapshot" || msg.type==="snapshot"){
+        this.syncOtherPlayers((msg.players||[]) as PlayerState[]);
+        return;
+      }
+
+      if(msg.type==="join"){
+        const p=msg.player as PlayerState;
+        if(p.id===this.meId)return;
+        const current=this.others.get(p.id);
+        if(current){
+          if(String(current.getData("race")||"teddy")!==p.race){
+            current.destroy(true);
+            this.others.delete(p.id);
+          }else{
+            current.setPosition(p.x,p.y);
+            this.updatePlayerIdentity(current,p.name,this.normalizeStatus(p.status),this.normalizeDirection(p.direction));
+            return;
+          }
+        }
+        this.others.set(p.id,this.makePlayer(
+          p.x,p.y,p.color,p.name,p.height,p.race||"teddy",
+          this.normalizeDirection(p.direction),this.normalizeStatus(p.status)
+        ));
+        return;
+      }
+
+      if(msg.type==="move"){
+        const p=this.others.get(msg.id);
+        if(p){
+          const oldX=p.x, oldY=p.y;
+          p.x=Phaser.Math.Linear(p.x,msg.x,.42);
+          p.y=Phaser.Math.Linear(p.y,msg.y,.42);
+          const rdx=p.x-oldX, rdy=p.y-oldY;
+          p.setData("remoteDX",rdx);
+          p.setData("remoteDY",rdy);
+          if(msg.direction)p.setData("direction",this.normalizeDirection(msg.direction));
+          p.setData("movingUntil",performance.now()+180);
+        }
+        return;
+      }
+
+      if(msg.type==="presence_update"){
+        const status=this.normalizeStatus(msg.status);
+        if(msg.id===this.meId){
+          this.presenceStatus=status;
+          if(this.me)this.updatePlayerIdentity(this.me,this.playerName,status);
+        }else{
+          const p=this.others.get(msg.id);
+          if(p)this.updatePlayerIdentity(p,String(p.getData("playerName")||"WALKER"),status);
+        }
+        return;
+      }
+
+      if(msg.type==="chat"){
+        if(msg.id===this.meId) return;
+        const p=this.others.get(msg.id);
+        if(p){
+          this.showBubble(p,msg.text);
+          this.addChatLog(String(p.getData("playerName")||"WALKER"),String(msg.text||""));
+        }
+        return;
+      }
+
+      if(msg.type==="money"){
+        this.money=Number(msg.amount)||0;
