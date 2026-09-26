@@ -14,6 +14,47 @@ const LOOP_OVERLAP_SECONDS = 5.0;
 const CROSSFADE_MS = 4000;
 const LOOP_MONITOR_MS = 100;
 
+// Phaser's HTML5 Audio loader creates one HTMLAudioElement per key by default.
+// A real crossfade needs two physical elements playing the same key at once,
+// otherwise starting the standby sound steals the only available element and
+// interrupts the active sound. Force two instances for map ambience at load time.
+const loaderProto = phaserRuntime.Loader?.LoaderPlugin?.prototype as any;
+if (loaderProto && !loaderProto.__summerEndMapAudioInstancesPatched) {
+  const originalAudio = loaderProto.audio;
+
+  loaderProto.audio = function loadMapAudioWithOverlapInstances(
+    key: unknown,
+    urls?: unknown,
+    config?: Record<string, unknown>,
+    xhrSettings?: unknown
+  ) {
+    const audioKey =
+      typeof key === "string"
+        ? key
+        : String((key as { key?: unknown } | null)?.key ?? "");
+
+    if (!isMapAudioKey(audioKey)) {
+      return originalAudio.call(this, key, urls, config, xhrSettings);
+    }
+
+    const requestedInstances = Number(config?.instances ?? 0);
+    const instances =
+      Number.isFinite(requestedInstances) && requestedInstances >= 2
+        ? Math.floor(requestedInstances)
+        : 2;
+
+    return originalAudio.call(
+      this,
+      key,
+      urls,
+      { ...(config ?? {}), instances },
+      xhrSettings
+    );
+  };
+
+  loaderProto.__summerEndMapAudioInstancesPatched = true;
+}
+
 const html5ManagerProto = phaserRuntime.Sound?.HTML5AudioSoundManager?.prototype as any;
 if (html5ManagerProto && !html5ManagerProto.__summerEndSeamlessLoopPatched) {
   const originalAdd = html5ManagerProto.add;
