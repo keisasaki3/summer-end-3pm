@@ -1,0 +1,111 @@
+name: Recover Shared World Core beta 0.49 run2
+
+on:
+  push:
+    branches:
+      - recovery/shared-world-core-v049
+    paths:
+      - .github/workflows/recover-v049-run2.yml
+
+permissions:
+  contents: write
+
+jobs:
+  recover:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout recovery branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Reconstruct reviewed final sources
+        shell: bash
+        run: |
+          set -euo pipefail
+          BASE_SHA=b34ad4d256c92d12ab0d9869fb4fabe9ee4fbfa9
+          git fetch origin main
+          test "$(git rev-parse origin/main)" = "$BASE_SHA"
+
+          {
+            cat scripts/v049-recovery/main.part01
+            printf '\n'
+            cat scripts/v049-recovery/main.part02
+            printf '\n'
+            cat scripts/v049-recovery/main.part03
+            cat scripts/v049-recovery/main.part04
+          } > client/src/main.ts
+
+          cat \
+            scripts/v049-recovery/server.part01 \
+            scripts/v049-recovery/server.part02 \
+            scripts/v049-recovery/server.part03 \
+            > server/server.js
+
+          cp -R scripts/v049-recovery/payload/. .
+
+          test "$(git hash-object client/src/main.ts)" = "a6cff16cab1753bc22e66002ff3af80fd0fa8703"
+          test "$(git hash-object server/server.js)" = "8a3c222a09f9f658c041c9448ed5d49aff8b7e66"
+          test "$(git hash-object client/src/shared-backend.ts)" = "44c7362a11f45e202e1a525fbb862bef0f886618"
+          test "$(git hash-object client/src/branding.ts)" = "0f15b1827378df2531f36f8950e054549e6ede51"
+          test "$(git hash-object server/shared-backend.js)" = "18610b4d87dddfe5331b4e962bb8d055eb4521e6"
+          test "$(git hash-object scripts/verify-shared-backend-static.mjs)" = "1978b8b7ea66df86235b62cefb0361fe9a1d33a3"
+          test "$(git hash-object package.json)" = "5d5005447f7847127c08c47df1dd24bc2aa5a586"
+          test "$(git hash-object SPEC.md)" = "8995b677db70916709644323da0dfa5509001c11"
+          test "$(git hash-object CHARACTER_SPRITE_SPEC.md)" = "0b4a036352e3541986798e8d7e2540b1dda37910"
+          test "$(git hash-object docs/SHARED_BACKEND.md)" = "760245eae29c61646067dab428365ceb05aecb7e"
+          test "$(git hash-object docs/IMPLEMENTATION_HANDOFF.md)" = "87113ceccb1b12307d6bffe5938a6cfb683c2006"
+
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+
+      - name: Build and validate
+        run: npm run build
+
+      - name: Server syntax checks
+        run: |
+          node --check server/server.js
+          node --check server/shared-backend.js
+
+      - name: Verify service-role boundary
+        shell: bash
+        run: |
+          set -euo pipefail
+          if grep -R --line-number --fixed-string 'SUPABASE_SERVICE_ROLE_KEY' client dist; then
+            echo 'service role env name leaked into client source or bundle'
+            exit 1
+          fi
+          if grep -R --line-number -E 'sb_secret_|service_role' client dist; then
+            echo 'service role marker leaked into client source or bundle'
+            exit 1
+          fi
+
+      - name: Publish one clean final commit to main
+        shell: bash
+        run: |
+          set -euo pipefail
+          BASE_SHA=b34ad4d256c92d12ab0d9869fb4fabe9ee4fbfa9
+
+          rm -rf scripts/v049-patches scripts/v049-recovery
+          rm -f .github/workflows/recover-v049.yml .github/workflows/recover-v049-run2.yml
+          rm -f package-lock.json
+
+          test ! -e scripts/v049-patches
+          test ! -e scripts/v049-recovery
+          test ! -e .github/workflows/recover-v049.yml
+          test ! -e .github/workflows/recover-v049-run2.yml
+
+          git add -A
+          git diff --cached --check
+          git reset --soft "$BASE_SHA"
+          git diff --cached --check
+
+          git config user.name "keisasaki3"
+          git config user.email "61055342+keisasaki3@users.noreply.github.com"
+          git commit -m "Complete Shared World Core integration beta 0.49"
+          git push origin HEAD:main
