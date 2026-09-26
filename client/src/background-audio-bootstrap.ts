@@ -47,6 +47,12 @@ phaserRuntime.Game = class BackgroundAudioGame extends OriginalGame {
         disableWebAudio: true,
       },
     });
+
+    // player-depth.ts is loaded as a separate browser entry point. Depending on
+    // bundling, importing Phaser again there can produce a different runtime and
+    // an empty Phaser.GAMES array. Expose the actual game instance created here
+    // so depth sorting always targets the live game that owns the player objects.
+    (window as any).__summerEnd3pmGame = this;
   }
 
   boot() {
