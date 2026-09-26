@@ -1,0 +1,430 @@
+    const bubble = this.add.container(0, 0, [label]);
+    c.add(bubble);
+    c.setData("bubble", bubble);
+
+    this.time.delayedCall(5000, () => {
+      if (c.getData("bubble") === bubble) {
+        bubble.destroy(true);
+        c.setData("bubble", undefined);
+      }
+    });
+  }
+
+
+  private async setupLogin() {
+    if (this.input.keyboard) this.input.keyboard.enabled = false;
+
+    const overlay = document.createElement("div");
+    Object.assign(overlay.style, {
+      position:"fixed", inset:"0", zIndex:"20000",
+      display:"flex", alignItems:"center", justifyContent:"center",
+      background:"rgba(20,18,24,.92)", fontFamily:"sans-serif"
+    } as Partial<CSSStyleDeclaration>);
+
+    const panel = document.createElement("div");
+    Object.assign(panel.style, {
+      width:"min(440px, calc(100vw - 32px))",
+      padding:"24px", borderRadius:"16px",
+      background:"#2d2933", color:"#fff8e8",
+      boxShadow:"0 18px 50px rgba(0,0,0,.35)"
+    } as Partial<CSSStyleDeclaration>);
+
+    const brand=document.createElement("div");
+    brand.textContent=GAME_TITLE;
+    Object.assign(brand.style,{
+      fontSize:"16px",fontWeight:"600",letterSpacing:".08em",opacity:".78",marginBottom:"7px"
+    } as Partial<CSSStyleDeclaration>);
+
+    const title = document.createElement("div");
+    title.textContent = "夕凪町へ";
+    Object.assign(title.style, {
+      fontSize:"26px", fontWeight:"700", marginBottom:"18px"
+    } as Partial<CSSStyleDeclaration>);
+
+    const message=document.createElement("div");
+    Object.assign(message.style,{
+      minHeight:"20px",fontSize:"13px",lineHeight:"1.5",opacity:".82",marginBottom:"14px"
+    } as Partial<CSSStyleDeclaration>);
+
+    const setMessage=(text:string,error=false)=>{
+      message.textContent=text;
+      message.style.color=error ? "#ffb7b7" : "#fff0cf";
+    };
+
+    panel.append(brand,title,message);
+    overlay.appendChild(panel);
+    document.body.appendChild(overlay);
+
+    const enterGame=(accessToken:string)=>{
+      this.accessToken=accessToken;
+      overlay.remove();
+      this.loginOpen=false;
+      if(this.input.keyboard)this.input.keyboard.enabled=true;
+      this.setupChat();
+      this.applyMapAudio();
+      this.setupOptions();
+      this.setupMoneyHud();
+      this.connect();
+    };
+
+    if(!sharedBackendEnabled || !supabase){
+      setMessage("共有バックエンド未設定のため互換モードで起動します。");
+      this.renderLegacyLogin(panel,enterGame);
+      return;
+    }
+
+    const showProfileStep=async()=>{
+      try{
+        setMessage("共通プロフィールを読み込み中…");
+        const session=await getCurrentSession();
+        if(!session){
+          this.renderAuthLogin(panel,setMessage,showProfileStep);
+          return;
+        }
+
+        this.authUserId=session.user.id;
+        this.accessToken=session.access_token;
+        const [profile,races,presence]=await Promise.all([
+          ensureProfile(session.user),
+          loadRaceMasters(),
+          loadPresenceStatus(session.user.id)
+        ]);
+        this.applyRaceMasters(races);
+        this.presenceStatus=presence;
+
+        this.renderSharedProfileStep(
+          panel,
+          setMessage,
+          profile,
+          races,
+          presence,
+          async(displayName,raceId,status)=>{
+            const saved=await saveProfile(session.user.id,displayName,raceId);
+            await savePresenceStatus(session.user.id,status);
+            const currentSession=await getCurrentSession();
+            if(!currentSession)throw new Error("認証セッションが見つかりません。再ログインしてください。");
+
+            this.playerName=saved.display_name;
+            this.playerRace=saved.race_id || raceId;
+            this.playerHeight=1;
+            this.playerColor=0x60a5fa;
+            this.presenceStatus=status;
+            enterGame(currentSession.access_token);
+          }
+        );
+      }catch(error){
+        console.error(error);
+        setMessage(error instanceof Error ? error.message : "プロフィールの読み込みに失敗しました。",true);
+      }
+    };
+
+    await showProfileStep();
+  }
+
+  private clearLoginStep(panel:HTMLDivElement) {
+    Array.from(panel.querySelectorAll("[data-login-step]")).forEach((node)=>node.remove());
+  }
+
+  private renderAuthLogin(
+    panel:HTMLDivElement,
+    setMessage:(text:string,error?:boolean)=>void,
+    onAuthenticated:()=>Promise<void>
+  ) {
+    this.clearLoginStep(panel);
+    const wrap=document.createElement("div");
+    wrap.dataset.loginStep="auth";
+
+    const email=document.createElement("input");
+    email.type="email";
+    email.placeholder="メールアドレス";
+    email.autocomplete="email";
+    const password=document.createElement("input");
+    password.type="password";
+    password.placeholder="パスワード";
+    password.autocomplete="current-password";
+
+    for(const input of [email,password]){
+      Object.assign(input.style,{
+        width:"100%",height:"42px",boxSizing:"border-box",marginBottom:"10px",borderRadius:"10px",
+        border:"1px solid rgba(255,255,255,.2)",background:"#211e27",color:"#fff",padding:"0 12px",
+        fontSize:"15px",outline:"none"
+      } as Partial<CSSStyleDeclaration>);
+    }
+
+    const row=document.createElement("div");
+    Object.assign(row.style,{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"8px",marginBottom:"10px"} as Partial<CSSStyleDeclaration>);
+    const login=document.createElement("button");
+    login.type="button";
+    login.textContent="ログイン";
+    const signup=document.createElement("button");
+    signup.type="button";
+    signup.textContent="新規登録";
+    for(const button of [login,signup]){
+      Object.assign(button.style,{
+        height:"42px",borderRadius:"10px",border:"1px solid rgba(255,255,255,.2)",
+        background:"#f2e7c8",color:"#242027",fontWeight:"700",cursor:"pointer"
+      } as Partial<CSSStyleDeclaration>);
+    }
+    row.append(login,signup);
+
+    const google=document.createElement("button");
+    google.type="button";
+    google.textContent="Googleでログイン";
+    Object.assign(google.style,{
+      width:"100%",height:"44px",borderRadius:"10px",border:"1px solid rgba(255,255,255,.25)",
+      background:"#211e27",color:"#fff8e8",fontWeight:"700",cursor:"pointer"
+    } as Partial<CSSStyleDeclaration>);
+
+    const setDisabled=(value:boolean)=>{
+      login.disabled=value;signup.disabled=value;google.disabled=value;
+    };
+    const run=async(action:()=>Promise<void>)=>{
+      try{
+        setMessage("認証中…");
+        setDisabled(true);
+        await action();
+      }catch(error){
+        console.error(error);
+        setMessage(error instanceof Error ? error.message : "認証に失敗しました。",true);
+      }finally{
+        setDisabled(false);
+      }
+    };
+
+    login.onclick=()=>void run(async()=>{
+      if(!email.value.trim()||!password.value)throw new Error("メールアドレスとパスワードを入力してください。");
+      await signInWithEmail(email.value.trim(),password.value);
+      await onAuthenticated();
+    });
+    signup.onclick=()=>void run(async()=>{
+      if(!email.value.trim()||password.value.length<6)throw new Error("メールアドレスと6文字以上のパスワードを入力してください。");
+      const session=await signUpWithEmail(email.value.trim(),password.value);
+      if(session){
+        await onAuthenticated();
+      }else{
+        setMessage("確認メールを送信しました。メール内のリンクから認証してください。");
+      }
+    });
+    google.onclick=()=>void run(signInWithGoogle);
+
+    const submitOnEnter=(event:KeyboardEvent)=>{
+      if(event.key!=="Enter")return;
+      event.preventDefault();
+      login.click();
+    };
+    email.addEventListener("keydown",submitOnEnter);
+    password.addEventListener("keydown",submitOnEnter);
+
+    wrap.append(email,password,row,google);
+    panel.appendChild(wrap);
+    setMessage("共通アカウントでログインしてください。");
+    email.focus();
+  }
+
+  private renderSharedProfileStep(
+    panel:HTMLDivElement,
+    setMessage:(text:string,error?:boolean)=>void,
+    profile:{display_name:string;race_id:string|null},
+    races:RaceMaster[],
+    presence:PresenceStatus,
+    onStart:(displayName:string,raceId:string,status:PresenceStatus)=>Promise<void>
+  ) {
+    this.clearLoginStep(panel);
+    const wrap=document.createElement("div");
+    wrap.dataset.loginStep="profile";
+
+    const nameLabel=document.createElement("label");
+    nameLabel.textContent="表示名";
+    nameLabel.style.display="block";
+    nameLabel.style.marginBottom="6px";
+    const nameInput=document.createElement("input");
+    nameInput.type="text";
+    nameInput.maxLength=20;
+    nameInput.value=profile.display_name;
+    Object.assign(nameInput.style,{
+      width:"100%",height:"42px",boxSizing:"border-box",marginBottom:"16px",borderRadius:"10px",
+      border:"1px solid rgba(255,255,255,.2)",background:"#211e27",color:"#fff",padding:"0 12px",fontSize:"16px"
+    } as Partial<CSSStyleDeclaration>);
+
+    const usableRaces=races.filter((race)=>this.supportedSpriteRaces.has(race.race_id));
+    const storedRace=usableRaces.find((race)=>race.race_id===profile.race_id) ?? null;
+    let selectedRace=storedRace?.race_id ?? "";
+
+    const raceLabel=document.createElement("div");
+    raceLabel.textContent=storedRace ? "種族" : "種族を選択";
+    raceLabel.style.marginBottom="8px";
+    const raceArea=document.createElement("div");
+    raceArea.style.marginBottom="16px";
+
+    if(storedRace){
+      const fixed=document.createElement("div");
+      fixed.textContent=storedRace.name_ja;
+      Object.assign(fixed.style,{
+        padding:"12px",borderRadius:"10px",background:"#211e27",border:"1px solid rgba(255,255,255,.15)",
+        fontWeight:"700"
+      } as Partial<CSSStyleDeclaration>);
+      raceArea.appendChild(fixed);
+    }else{
+      Object.assign(raceArea.style,{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:"8px"} as Partial<CSSStyleDeclaration>);
+      const raceButtons:HTMLButtonElement[]=[];
+      for(const race of usableRaces){
+        const button=document.createElement("button");
+        button.type="button";
+        button.textContent=race.name_ja;
+        Object.assign(button.style,{
+          minHeight:"48px",borderRadius:"10px",background:"#211e27",color:"#fff8e8",fontSize:"13px",
+          fontWeight:"700",cursor:"pointer",border:"2px solid rgba(255,255,255,.15)"
+        } as Partial<CSSStyleDeclaration>);
+        button.onclick=()=>{
+          selectedRace=race.race_id;
+          raceButtons.forEach((item)=>item.style.border="2px solid rgba(255,255,255,.15)");
+          button.style.border="2px solid #fff";
+        };
+        raceButtons.push(button);
+        raceArea.appendChild(button);
+      }
+    }
+
+    const statusLabel=document.createElement("label");
+    statusLabel.textContent="ステータス";
+    statusLabel.style.display="block";
+    statusLabel.style.marginBottom="6px";
+    const status=document.createElement("select");
+    for(const [value,label] of [["studying","勉強中"],["reading","読書中"],["busy","取り込み中"],["afk","AFK"]] as const){
+      const option=document.createElement("option");
+      option.value=value;
+      option.textContent=label;
+      option.selected=value===presence;
+      status.appendChild(option);
+    }
+    Object.assign(status.style,{
+      width:"100%",height:"42px",boxSizing:"border-box",marginBottom:"18px",borderRadius:"10px",
+      border:"1px solid rgba(255,255,255,.2)",background:"#211e27",color:"#fff",padding:"0 10px"
+    } as Partial<CSSStyleDeclaration>);
+
+    const start=document.createElement("button");
+    start.type="button";
+    start.textContent="散歩をはじめる";
+    Object.assign(start.style,{
+      width:"100%",height:"46px",border:"0",borderRadius:"12px",background:"#f2e7c8",color:"#242027",
+      fontSize:"16px",fontWeight:"700",cursor:"pointer"
+    } as Partial<CSSStyleDeclaration>);
+    start.onclick=()=>void(async()=>{
+      try{
+        if(!selectedRace)throw new Error("種族を選択してください。");
+        start.disabled=true;
+        setMessage("プロフィールを保存中…");
+        await onStart(nameInput.value,selectedRace,status.value as PresenceStatus);
+      }catch(error){
+        console.error(error);
+        setMessage(error instanceof Error ? error.message : "プロフィール保存に失敗しました。",true);
+        start.disabled=false;
+      }
+    })();
+
+    wrap.append(nameLabel,nameInput,raceLabel,raceArea,statusLabel,status,start);
+    panel.appendChild(wrap);
+    setMessage(storedRace ? "共通プロフィールを確認して散歩を始めます。" : "最初に共通種族を選んでください。");
+  }
+
+  private renderLegacyLogin(panel:HTMLDivElement,onStart:(accessToken:string)=>void) {
+    this.clearLoginStep(panel);
+    const wrap=document.createElement("div");
+    wrap.dataset.loginStep="legacy";
+
+    const name=document.createElement("input");
+    name.placeholder="名前";
+    name.maxLength=16;
+    Object.assign(name.style,{
+      width:"100%",height:"42px",boxSizing:"border-box",marginBottom:"12px",borderRadius:"10px",
+      background:"#211e27",color:"#fff",border:"1px solid #ffffff33",padding:"0 12px"
+    } as Partial<CSSStyleDeclaration>);
+
+    const race=document.createElement("select");
+    for(const [value,label] of [["teddy","テディぐま"],["ancient-robot","いにしえロボット"],["rabbit-jk","うさぎjk"]]){
+      const option=document.createElement("option");
+      option.value=value;
+      option.textContent=label;
+      race.appendChild(option);
+    }
+    Object.assign(race.style,{
+      width:"100%",height:"42px",boxSizing:"border-box",marginBottom:"16px",borderRadius:"10px",
+      background:"#211e27",color:"#fff",border:"1px solid #ffffff33",padding:"0 10px"
+    } as Partial<CSSStyleDeclaration>);
+
+    const start=document.createElement("button");
+    start.type="button";
+    start.textContent="散歩をはじめる";
+    Object.assign(start.style,{
+      width:"100%",height:"46px",border:0,borderRadius:"12px",background:"#f2e7c8",fontWeight:"700",cursor:"pointer"
+    } as Partial<CSSStyleDeclaration>);
+    const begin=()=>{
+      this.playerName=name.value.trim()||"WALKER";
+      this.playerRace=race.value;
+      this.playerHeight=1;
+      this.playerColor=0x60a5fa;
+      this.presenceStatus="afk";
+      onStart("");
+    };
+    start.onclick=begin;
+    name.addEventListener("keydown",(event)=>{if(event.key==="Enter")begin();});
+
+    wrap.append(name,race,start);
+    panel.appendChild(wrap);
+    name.focus();
+  }
+
+  private setupChatLog() {
+    const log=document.createElement("div");
+    Object.assign(log.style,{
+      position:"fixed",left:"18px",bottom:"76px",zIndex:"9998",
+      width:"min(430px, calc(100vw - 36px))",minHeight:"58px",maxHeight:"142px",
+      overflow:"hidden",boxSizing:"border-box",padding:"9px 12px",
+      borderRadius:"8px",background:"rgba(13,16,22,.42)",
+      color:"rgba(255,248,235,.88)",font:"13px/1.55 system-ui,sans-serif",
+      textShadow:"0 1px 2px rgba(0,0,0,.65)",pointerEvents:"none",
+      transition:"background .16s ease, opacity .16s ease",opacity:".86"
+    } as Partial<CSSStyleDeclaration>);
+    document.body.appendChild(log);
+    this.chatLog=log;
+    this.renderChatLog();
+  }
+
+  private addChatLog(name:string,text:string) {
+    const cleanName=String(name||"WALKER").slice(0,20);
+    const cleanText=String(text||"").slice(0,80);
+    if(!cleanText)return;
+    this.chatLines.push(`${cleanName}：${cleanText}`);
+    if(this.chatLines.length>30)this.chatLines.splice(0,this.chatLines.length-30);
+    this.renderChatLog();
+  }
+
+  private renderChatLog() {
+    if(!this.chatLog)return;
+    this.chatLog.replaceChildren();
+    const visible=this.chatLines.slice(-6);
+    for(const line of visible){
+      const row=document.createElement("div");
+      row.textContent=line;
+      row.style.whiteSpace="pre-wrap";
+      row.style.overflowWrap="anywhere";
+      this.chatLog.appendChild(row);
+    }
+    this.chatLog.style.display=visible.length ? "block" : "none";
+  }
+
+  private setupChat() {
+    this.setupChatLog();
+    const input = document.createElement("input");
+    input.type = "text";
+    input.maxLength = 80;
+    input.placeholder = "Speak into the evening...";
+    input.autocomplete = "off";
+    Object.assign(input.style, {
+      position: "fixed",
+      left: "50%",
+      bottom: "18px",
+      transform: "translateX(-50%)",
+      width: "min(520px, calc(100vw - 28px))",
+      height: "44px",
+      boxSizing: "border-box",
