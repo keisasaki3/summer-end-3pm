@@ -165,6 +165,8 @@ Shared World Core用環境変数がサーバー・クライアント双方で未
 - 木漏れ日神社: `komorebi-cicadas-birds`
 - コンビニ: `convenience-night-ambience`
 
+MP3のエンコーダ遅延・末尾/先頭の静音区間によるループ切れを避けるため、マップ環境音は同一音源の2トラックを交互に使う。現行実装では終端5秒前から次トラックを開始し、4秒間クロスフェードする。通常の `loop:true` だけには依存しない。
+
 ユーザーのOPTIONS音量は共通マスター音量とする。音源そのものの体感差は `client/src/map-audio-levels.ts` のマップ別補正倍率で吸収する。
 
 実効音量:
