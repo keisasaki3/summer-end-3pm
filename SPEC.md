@@ -79,7 +79,7 @@ Shared World Core の `player_presence.status` に対応する。
 
 ログイン時に共通値を読み込み、OPTIONSから変更できる。ゲーム中の変更はWebSocketサーバーを経由してDBへ保存し、同一マップのプレイヤーへ `presence_update` を配信する。
 
-## 7. リアルタイムWebSocket
+## 7. リアルタイムWebSocket / キャラクター描画順
 
 リアルタイム位置の authoritative source は引き続き既存 Node.js / `ws` サーバー。
 
@@ -91,6 +91,14 @@ Shared World Core の `player_presence.status` に対応する。
 - reconnect: 1 / 2 / 4 / 8秒バックオフ
 - map scoped join / move / chat / leave
 - Y座標（足元）によるキャラクター描画順
+
+キャラクターの前後関係は `player-depth.ts` が毎フレーム全プレイヤーを同一ルールで並べ替える。
+
+- 足元Yが大きいキャラクターほど手前に描画する
+- 自キャラ / 他キャラで通常の優先度を変えない
+- 生成順による固定バイアスは使用しない
+- 足元Yが完全に同一の場合だけ、自キャラを最終タイブレークとして手前に出し、操作中の自キャラが完全に隠れ続ける状態を防ぐ
+- 他キャラ同士の完全同位置はX座標・表示名で決定論的にタイブレークする
 
 認証モードでは同一 `auth.users.id` の重複接続は **新しいsocketを優先**する。古いsocketのclose処理が新socketのプレイヤー状態を消さないよう、active socketを照合する。
 
@@ -148,14 +156,27 @@ Shared World Core用環境変数がサーバー・クライアント双方で未
 
 ## 11. 音声
 
-β0.47以降、旧BGMは削除済み。現在は全マップ無音。
+各マップで環境音をループ再生する。タブやウィンドウが非アクティブになっても可能な限り継続再生するため、マップ環境音は HTML5 Audio を使用し、`pauseOnBlur = false` とする。
 
-将来用:
+現行音源:
 
-- `audioAssets`
-- `mapData[map].audio.bgmKey`
-- `mapData[map].audio.ambienceKeys`
-- `applyMapAudio()`
+- 夕凪町: `yunagicho-perves-village`
+- 木漏れ日神社: `komorebi-cicadas-birds`
+- コンビニ: `convenience-night-ambience`
+
+ユーザーのOPTIONS音量は共通マスター音量とする。音源そのものの体感差は `client/src/map-audio-levels.ts` のマップ別補正倍率で吸収する。
+
+実効音量:
+
+`実効音量 = ユーザーのマスター音量 × MAP_AUDIO_GAIN[map]`
+
+現行補正倍率:
+
+- `yunagicho`: `1.00`
+- `komorebi`: `0.42`（約 -7.5 dB。セミ主体で密度が高く、他マップより強く聞こえるため減衰）
+- `convenience`: `1.00`
+
+マップを追加・音源を交換した場合は、ユーザーのマスター音量を変更するのではなく、そのマップの `MAP_AUDIO_GAIN` を校正する。
 
 ## 12. クイズ
 
@@ -175,24 +196,22 @@ Shared World Core統合を変更する場合は少なくとも次を確認する
 - fresh loginはDB保存位置を復元
 - reconnectはclient live位置を優先
 - 2人同時接続、heartbeat snapshot、reconnect、chat、3マップ、Y-sortを維持
+- マップ音量は `master volume × map gain` で適用される
 
 成果物/commit前に独立した2回の検証を行う。
 
 ## 14. TODO
 
-- [ ] **キャラクター同士が重なった際の描画順を自然化する。** 現状、他キャラクターが常に自キャラクターの真上に重なって見えるケースが残っている。2Dゲームとして自然になるよう、各キャラクターの足元Y座標を基準に前後関係を毎フレーム正しく決定し、自キャラ・他キャラを区別せず同一ルールで描画する。
-- [ ] **マップ間の体感音量を平均化する。** 木漏れ日神社の音源だけ他マップより著しく大きいため、マップ／音源ごとのゲイン補正を導入するなどして、夕凪町・木漏れ日神社・コンビニ間で体感上の音量差が大きくならないよう調整する。
+現在なし。
 
 ## Audio credits
 
 - コンビニBGM: **Night Ambience** — cclaretc (Freesound) / Pixabay
 - https://pixabay.com/sound-effects/nature-night-ambience-17064/
 
-
 - 夕凪町BGM: **Perves Ambient Mountains Distant Small Village** — jordir / Freesound
 - Source: https://freesound.org/people/jordir/sounds/587370/
 - License: CC0
-
 
 - 木漏れ日神社BGM: **Cicadas + Birds** — kvgarlic / Freesound
 - Source: https://freesound.org/people/kvgarlic/sounds/275634/
