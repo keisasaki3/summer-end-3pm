@@ -17,7 +17,6 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -25,15 +24,14 @@ jobs:
       - name: Add exact uploaded Night Ambience asset
         run: |
           mkdir -p public/audio
-          curl -L --fail --retry 3 \
-            'https://raw.githubusercontent.com/BitOpenCode/rain-puddle/main/public/sounds/night-ambience-17064.mp3' \
-            -o public/audio/convenience-night-ambience-17064.mp3
+          curl -L --fail --retry 3 'https://raw.githubusercontent.com/BitOpenCode/rain-puddle/main/public/sounds/night-ambience-17064.mp3' -o public/audio/convenience-night-ambience-17064.mp3
           echo '2c79c0edbf188318c5aa4faf743b526c504520a8dffbf043619f7e39a5e83b36  public/audio/convenience-night-ambience-17064.mp3' | sha256sum -c -
 
-      - name: Patch title, map audio and visible credit
+      - name: Patch title map audio and credit
         shell: python
         run: |
           from pathlib import Path
+          import re
 
           def must_replace(path, old, new):
               p = Path(path)
@@ -42,102 +40,60 @@ jobs:
                   raise SystemExit(f'pattern not found in {path}: {old[:120]!r}')
               p.write_text(text.replace(old, new))
 
-          # Official product title.
-          must_replace(
-              'client/src/branding.ts',
-              'export const GAME_TITLE = "午後三時、夏の果。";',
-              'export const GAME_TITLE = "午後三時、夏の果て";'
-          )
+          must_replace('client/src/branding.ts', 'export const GAME_TITLE = "午後三時、夏の果。";', 'export const GAME_TITLE = "午後三時、夏の果て";')
 
           main = Path('client/src/main.ts')
           text = main.read_text()
-
-          must_old = 'private readonly audioAssets: Record<string,string> = {};'
-          must_new = '''private readonly audioAssets: Record<string,string> = {
-    "convenience-night-ambience": "/audio/convenience-night-ambience-17064.mp3"
-  };'''
-          if must_old not in text:
+          old_audio = 'private readonly audioAssets: Record<string,string> = {};'
+          new_audio = 'private readonly audioAssets: Record<string,string> = {\n    "convenience-night-ambience": "/audio/convenience-night-ambience-17064.mp3"\n  };'
+          if old_audio not in text:
               raise SystemExit('audioAssets pattern missing')
-          text = text.replace(must_old, must_new)
+          text = text.replace(old_audio, new_audio)
 
-          old_convenience = '''convenience: {
-      name:"コンビニ", texture:"convenience-field", quiz:false,
-      audio:{ bgmKey:null, ambienceKeys:[] }
-    }'''
-          new_convenience = '''convenience: {
-      name:"コンビニ", texture:"convenience-field", quiz:false,
-      audio:{ bgmKey:"convenience-night-ambience", ambienceKeys:[] }
-    }'''
-          if old_convenience not in text:
+          old_map = 'convenience: {\n      name:"コンビニ", texture:"convenience-field", quiz:false,\n      audio:{ bgmKey:null, ambienceKeys:[] }\n    }'
+          new_map = 'convenience: {\n      name:"コンビニ", texture:"convenience-field", quiz:false,\n      audio:{ bgmKey:"convenience-night-ambience", ambienceKeys:[] }\n    }'
+          if old_map not in text:
               raise SystemExit('convenience map audio pattern missing')
-          text = text.replace(old_convenience, new_convenience)
-
+          text = text.replace(old_map, new_map)
           text = text.replace('β 0.50', 'β 0.51')
 
-          anchor = '''      box.append(statusLabel,statusSelect);
-    }
-
-    const actions=document.createElement("div");'''
-          credit = '''      box.append(statusLabel,statusSelect);
-    }
-
-    const credits=document.createElement("div");
-    Object.assign(credits.style,{marginTop:"18px",paddingTop:"14px",borderTop:"1px solid #ffffff22",fontSize:"11px",lineHeight:"1.5",opacity:".72"} as Partial<CSSStyleDeclaration>);
-    const creditTitle=document.createElement("div");
-    creditTitle.textContent="BGM: Night Ambience — cclaretc (Freesound) / Pixabay";
-    const creditLink=document.createElement("a");
-    creditLink.href="https://pixabay.com/sound-effects/nature-night-ambience-17064/";
-    creditLink.target="_blank";
-    creditLink.rel="noopener noreferrer";
-    creditLink.textContent="Pixabay";
-    Object.assign(creditLink.style,{color:"#fff",opacity:".9"} as Partial<CSSStyleDeclaration>);
-    credits.append(creditTitle,creditLink);
-    box.appendChild(credits);
-
-    const actions=document.createElement("div");'''
+          anchor = '      box.append(statusLabel,statusSelect);\n    }\n\n    const actions=document.createElement("div");'
+          credit = '      box.append(statusLabel,statusSelect);\n    }\n\n    const credits=document.createElement("div");\n    Object.assign(credits.style,{marginTop:"18px",paddingTop:"14px",borderTop:"1px solid #ffffff22",fontSize:"11px",lineHeight:"1.5",opacity:".72"} as Partial<CSSStyleDeclaration>);\n    const creditTitle=document.createElement("div");\n    creditTitle.textContent="BGM: Night Ambience — cclaretc (Freesound) / Pixabay";\n    const creditLink=document.createElement("a");\n    creditLink.href="https://pixabay.com/sound-effects/nature-night-ambience-17064/";\n    creditLink.target="_blank";\n    creditLink.rel="noopener noreferrer";\n    creditLink.textContent="Pixabay";\n    Object.assign(creditLink.style,{color:"#fff",opacity:".9"} as Partial<CSSStyleDeclaration>);\n    credits.append(creditTitle,creditLink);\n    box.appendChild(credits);\n\n    const actions=document.createElement("div");'
           if anchor not in text:
               raise SystemExit('OPTIONS credit anchor missing')
           text = text.replace(anchor, credit)
           main.write_text(text)
 
-          # Keep visible project docs aligned with the new official title/version.
           for path in ['README.md','SPEC.md','docs/README.md','docs/SHARED_BACKEND.md','docs/IMPLEMENTATION_HANDOFF.md']:
-              p=Path(path)
+              p = Path(path)
               if not p.exists():
                   continue
-              d=p.read_text()
-              d=d.replace('午後三時、夏の果。','午後三時、夏の果て')
-              d=d.replace('β 0.50','β 0.51')
+              d = p.read_text().replace('午後三時、夏の果。','午後三時、夏の果て').replace('β 0.50','β 0.51')
               p.write_text(d)
 
-          # README was older than runtime; align its headline as well.
-          readme=Path('README.md')
-          d=readme.read_text()
-          import re
-          d=re.sub(r'^(# 午後三時、夏の果て) β [^\n]+', r'\1 β 0.51', d, count=1, flags=re.M)
+          readme = Path('README.md')
+          d = readme.read_text()
+          d = re.sub(r'^(# 午後三時、夏の果て) β [^\n]+', r'\1 β 0.51', d, count=1, flags=re.M)
           if '## Audio credit' not in d:
-              d += '''\n\n## Audio credit\n\n- Convenience-store BGM: **Night Ambience** — cclaretc (Freesound) / Pixabay\n- Source: https://pixabay.com/sound-effects/nature-night-ambience-17064/\n- License: Pixabay Content License\n'''
+              d += '\n\n## Audio credit\n\n- Convenience-store BGM: **Night Ambience** — cclaretc (Freesound) / Pixabay\n- Source: https://pixabay.com/sound-effects/nature-night-ambience-17064/\n- License: Pixabay Content License\n'
           readme.write_text(d)
 
-          spec=Path('SPEC.md')
-          s=spec.read_text()
+          spec = Path('SPEC.md')
+          s = spec.read_text()
           if 'Night Ambience' not in s:
-              s += '''\n\n## Audio credits\n\n- コンビニBGM: **Night Ambience** — cclaretc (Freesound) / Pixabay\n- https://pixabay.com/sound-effects/nature-night-ambience-17064/\n'''
+              s += '\n\n## Audio credits\n\n- コンビニBGM: **Night Ambience** — cclaretc (Freesound) / Pixabay\n- https://pixabay.com/sound-effects/nature-night-ambience-17064/\n'
           spec.write_text(s)
 
           must_replace('package.json', '"version": "0.50.0-beta.1"', '"version": "0.51.0-beta.1"')
 
       - name: Install dependencies
         run: npm install
-
       - name: Build and validate
         run: npm run build
-
       - name: Server syntax checks
         run: |
           node --check server/server.js
           node --check server/shared-backend.js
-
       - name: Verify requested behavior independently
         run: |
           grep -F 'export const GAME_TITLE = "午後三時、夏の果て";' client/src/branding.ts
@@ -148,7 +104,6 @@ jobs:
           test -s public/audio/convenience-night-ambience-17064.mp3
           echo '2c79c0edbf188318c5aa4faf743b526c504520a8dffbf043619f7e39a5e83b36  public/audio/convenience-night-ambience-17064.mp3' | sha256sum -c -
           ! grep -R 'SUPABASE_SERVICE_ROLE_KEY' client dist || exit 1
-
       - name: Commit beta 0.51
         run: |
           git config user.name 'keisasaki3'
