@@ -7,8 +7,11 @@ import { getMapAudioGainForKey, isMapAudioKey } from "./map-audio-levels";
 const phaserRuntime = Phaser as any;
 
 const clamp01 = (value: number) => Math.min(1, Math.max(0, value));
-const LOOP_OVERLAP_SECONDS = 1.35;
-const CROSSFADE_MS = 650;
+// Ambient recordings can contain quiet lead-in/out material in addition to MP3
+// encoder padding. Start the standby copy early enough that both boundaries are
+// buried inside a long overlap instead of exposing a short silent notch.
+const LOOP_OVERLAP_SECONDS = 5.0;
+const CROSSFADE_MS = 4000;
 const LOOP_MONITOR_MS = 100;
 
 const html5ManagerProto = phaserRuntime.Sound?.HTML5AudioSoundManager?.prototype as any;
