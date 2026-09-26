@@ -16,6 +16,9 @@ const AUDIO_KEY_TO_MAP: Record<string, AudioMapId> = {
   "convenience-night-ambience": "convenience",
 };
 
+export const isMapAudioKey = (audioKey: string): boolean =>
+  Object.prototype.hasOwnProperty.call(AUDIO_KEY_TO_MAP, audioKey);
+
 export const getMapAudioGainForKey = (audioKey: string): number => {
   const mapId = AUDIO_KEY_TO_MAP[audioKey];
   return mapId ? MAP_AUDIO_GAIN[mapId] : 1.0;
