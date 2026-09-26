@@ -1,6 +1,6 @@
 # 午後三時、夏の果て — 実装仕様（現行）
 
-更新: 2026-09-26 / β 0.51
+更新: 2026-09-26 / β 0.52
 
 ## 1. 作品
 
@@ -183,3 +183,8 @@ Shared World Core統合を変更する場合は少なくとも次を確認する
 
 - コンビニBGM: **Night Ambience** — cclaretc (Freesound) / Pixabay
 - https://pixabay.com/sound-effects/nature-night-ambience-17064/
+
+
+- 夕凪町BGM: **Perves Ambient Mountains Distant Small Village** — jordir / Freesound
+- Source: https://freesound.org/people/jordir/sounds/587370/
+- License: CC0

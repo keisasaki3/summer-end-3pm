@@ -93,6 +93,7 @@ class WalkScene extends Phaser.Scene {
 
   // 今後、環境音/BGMファイルを追加したらここへ key -> URL を登録する。
   private readonly audioAssets: Record<string,string> = {
+    "yunagicho-perves-village": "/audio/yunagicho-perves-village-587370.mp3",
     "convenience-night-ambience": "/audio/convenience-night-ambience-17064.mp3"
   };
 
@@ -108,7 +109,7 @@ class WalkScene extends Phaser.Scene {
   private readonly mapData: Record<MapId,MapDefinition> = {
     yunagicho: {
       name:"夕凪町", texture:"yunagicho-field", quiz:false,
-      audio:{ bgmKey:null, ambienceKeys:[] }
+      audio:{ bgmKey:"yunagicho-perves-village", ambienceKeys:[] }
     },
     komorebi: {
       name:"木漏れ日神社", texture:"komorebi-field", quiz:false,
@@ -222,7 +223,7 @@ class WalkScene extends Phaser.Scene {
     void this.setupLogin();
     this.setupCollisionMap();
 
-    this.mapTitle = this.add.text(18, 18, "夕凪町　18:42　β 0.51", {
+    this.mapTitle = this.add.text(18, 18, "夕凪町　18:42　β 0.52", {
       fontFamily: "serif", fontSize: "18px", color: "#fff4df",
       backgroundColor: "#2b243088", padding: { x:10, y:7 }
     }).setScrollFactor(0).setDepth(1000);
@@ -1495,7 +1496,16 @@ for(const race of usableRaces){
     creditLink.rel="noopener noreferrer";
     creditLink.textContent="Pixabay";
     Object.assign(creditLink.style,{color:"#fff",opacity:".9"} as Partial<CSSStyleDeclaration>);
-    credits.append(creditTitle,creditLink);
+    const yunagiCreditTitle=document.createElement("div");
+    yunagiCreditTitle.style.marginTop="8px";
+    yunagiCreditTitle.textContent="BGM: Perves Ambient Mountains Distant Small Village — jordir / Freesound";
+    const yunagiCreditLink=document.createElement("a");
+    yunagiCreditLink.href="https://freesound.org/people/jordir/sounds/587370/";
+    yunagiCreditLink.target="_blank";
+    yunagiCreditLink.rel="noopener noreferrer";
+    yunagiCreditLink.textContent="Freesound";
+    Object.assign(yunagiCreditLink.style,{color:"#fff",opacity:".9"} as Partial<CSSStyleDeclaration>);
+    credits.append(creditTitle,creditLink,yunagiCreditTitle,yunagiCreditLink);
     box.appendChild(credits);
 
     const actions=document.createElement("div");
@@ -1561,9 +1571,9 @@ for(const race of usableRaces){
 
   private updateMapTitle() {
     this.mapTitle?.setText(
-      this.currentMap==="yunagicho" ? "夕凪町　18:42　β 0.51" :
-      this.currentMap==="komorebi" ? "木漏れ日神社　β 0.51" :
-      "コンビニ　β 0.51"
+      this.currentMap==="yunagicho" ? "夕凪町　18:42　β 0.52" :
+      this.currentMap==="komorebi" ? "木漏れ日神社　β 0.52" :
+      "コンビニ　β 0.52"
     );
   }
 
