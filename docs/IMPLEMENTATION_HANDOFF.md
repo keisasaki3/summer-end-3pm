@@ -1,52 +1,64 @@
-# Shared Backend Implementation Handoff
+# 午後三時、夏の果。 — Implementation Handoff
 
-更新日: 2026-09-26
+更新: 2026-09-26 / β 0.49
 
-## Status
-Shared World Core client/server integrationはβ0.49で実装済み。
-次の担当者は新規実装ではなく、共通Supabase projectのactivationと実環境E2Eから開始する。
+## Read first
 
-## Source of Truth
 1. `SPEC.md`
 2. `CHARACTER_SPRITE_SPEC.md`
 3. `docs/SHARED_BACKEND.md`
-4. `keisasaki3/keisasaki3.github.io/shared-world-core/`
-   - `docs/ARCHITECTURE.md`
-   - `docs/AUTH.md`
-   - `docs/DATABASE.md`
-   - `supabase/migrations/001_initial_schema.sql`
-   - `supabase/seed.sql`
+4. Shared World Core: `keisasaki3/keisasaki3.github.io/shared-world-core/`
 
-## Implemented files
-- `client/src/shared-backend.ts`: Supabase browser client / auth / profile / races / presence
-- `client/src/main.ts`: auth onboarding, shared profile, token-bearing WS join, status UI, direction sync
-- `server/server.js`: access-token verification, profile/race authority, durable state persistence, shared presence
-- `.env.example`: required env names
+共通DB/Authの仕様はShared World Core側を優先する。
 
-## Activation checklist
-1. Shared Supabase projectを用意/接続
-2. canonical migration `001_initial_schema.sql` を適用
-3. `seed.sql` を適用
-4. Google providerを有効化
-5. Render URLをAuth redirect allow-listへ追加
-6. Renderへ以下を設定
-   - `VITE_SUPABASE_URL`
-   - `VITE_SUPABASE_PUBLISHABLE_KEY`
-   - `SUPABASE_URL`
-   - `SUPABASE_SERVICE_ROLE_KEY`
-7. main branchを再deploy
-8. E2E verificationを実施
+## Runtime architecture
 
-## Non-regression requirements
-変更時に以下を壊さない。
-- 12秒heartbeat
-- 25秒ping/pong
-- heartbeat presence snapshot
-- 1/2/4/8秒reconnect
-- map transitions
-- character rendering / Y-sort
-- WebSocket realtime position authority
-- sprite validation/build
+- Phaser 3 / TypeScript / Vite client
+- Node.js + raw `ws` server
+- Supabase Auth + Postgres for shared identity and durable state
+- realtime movement authority remains WebSocket server
 
-DBへ毎frame positionを書かない。
-service role keyをclientへ入れない。
+## Critical invariants
+
+- service role key never enters client/Vite
+- authenticated player id comes from verified access token
+- client name/race are not authoritative in auth mode
+- no per-player avatar customization; race fully determines appearance
+- do not write coordinates to Supabase per frame/move packet
+- reconnect with an existing local player must prefer client live location over old DB snapshot
+- keep 12s heartbeat, 25s ping, authoritative heartbeat snapshot, 1/2/4/8 reconnect
+- duplicate account: newest socket wins
+- preserve 3 current maps, chat and Y-sort
+- quiz remains disabled
+
+## Files
+
+- `client/src/main.ts` — gameplay + auth/profile UI + WS client
+- `client/src/shared-backend.ts` — browser Supabase helper
+- `client/src/player-depth.ts` — feet-Y depth sorting
+- `server/server.js` — realtime server + persistence scheduling
+- `server/shared-backend.js` — server-only Supabase access
+- `.env.example` — variable names only
+
+## Durable state policy
+
+- immediate: map transition / logout
+- best effort: disconnect
+- normal movement: ~15s throttled snapshot
+- live authoritative: server memory / WebSocket
+
+## Validation before release
+
+Run:
+
+```bash
+npm install
+npm run validate:sprites
+npm run build
+node --check server/server.js
+node --check server/shared-backend.js
+```
+
+Then verify no service-role string/value exists under `client/` or generated `dist/`.
+
+Test two authenticated browsers, reconnect, heartbeat longevity, map transition, chat, status and saved-position restore.

@@ -50,13 +50,6 @@ export async function getCurrentSession(): Promise<Session | null> {
   return data.session;
 }
 
-export async function getCurrentUser(): Promise<User | null> {
-  if (!supabase) return null;
-  const { data, error } = await supabase.auth.getUser();
-  if (error) throw error;
-  return data.user;
-}
-
 export async function loadRaceMasters(): Promise<RaceMaster[]> {
   const client = requireClient();
   const { data, error } = await client
@@ -87,6 +80,8 @@ export async function loadProfile(userId: string): Promise<SharedProfile | null>
 export async function ensureProfile(user: User): Promise<SharedProfile> {
   const client = requireClient();
 
+  // The canonical Shared World Core trigger normally creates this row. Give it
+  // a brief chance to finish before using the RLS-protected own-row fallback.
   for (let attempt = 0; attempt < 4; attempt += 1) {
     const existing = await loadProfile(user.id);
     if (existing) return existing;

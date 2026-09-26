@@ -5,9 +5,10 @@
     "dev": "concurrently \"npm:dev:server\" \"npm:dev:client\"",
     "dev:client": "vite --host 0.0.0.0",
     "dev:server": "node server/server.js --dev",
-    "build": "npm run validate:sprites && vite build",
+    "build": "npm run validate:sprites && npm run verify:shared-backend && vite build",
     "start": "node server/server.js",
-    "validate:sprites": "node scripts/validate-sprites.mjs"
+    "validate:sprites": "node scripts/validate-sprites.mjs",
+    "verify:shared-backend": "node scripts/verify-shared-backend-static.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.57.4",

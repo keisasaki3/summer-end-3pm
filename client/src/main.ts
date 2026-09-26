@@ -1,4 +1,21 @@
 import Phaser from "phaser";
+import { GAME_TITLE } from "./branding";
+import {
+  ensureProfile,
+  getCurrentSession,
+  loadPresenceStatus,
+  loadRaceMasters,
+  savePresenceStatus,
+  saveProfile,
+  sharedBackendEnabled,
+  signInWithEmail,
+  signInWithGoogle,
+  signOutShared,
+  signUpWithEmail,
+  supabase,
+  type PresenceStatus,
+  type RaceMaster,
+} from "./shared-backend";
 
 const isViteDev = location.port === "5173";
 const SERVER_URL = isViteDev
@@ -6,9 +23,27 @@ const SERVER_URL = isViteDev
   : `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}`;
 
 type MapId = "yunagicho" | "komorebi" | "convenience";
+type Direction = "up" | "down" | "left" | "right";
 type MapAudioConfig = { bgmKey: string | null; ambienceKeys: string[] };
 type MapDefinition = { name: string; texture: string; quiz: boolean; audio: MapAudioConfig };
-type PlayerState = { id: string; x: number; y: number; color: number; name: string; height: number; race: string; map?: MapId };
+type PlayerState = {
+  id: string;
+  x: number;
+  y: number;
+  color: number;
+  name: string;
+  height: number;
+  race: string;
+  map?: MapId;
+  direction?: Direction;
+  status?: PresenceStatus;
+};
+type RuntimeRaceData = {
+  texturePrefix: string;
+  moveSpeed: number;
+  sizeClass: "standard";
+  visualScale: number;
+};
 
 class WalkScene extends Phaser.Scene {
   private meId = "";
@@ -29,6 +64,7 @@ class WalkScene extends Phaser.Scene {
   private chatLines: string[] = [];
   private coordHud?: HTMLDivElement;
   private coordsVisible = (
+    localStorage.getItem("summer-end-3pm-show-coords") ??
     localStorage.getItem("nantoka-show-coords") ??
     localStorage.getItem("vw-show-coords") ??
     "1"
@@ -37,6 +73,9 @@ class WalkScene extends Phaser.Scene {
   private playerColor = 0x60a5fa;
   private playerHeight = 1;
   private playerRace = "teddy";
+  private authUserId = "";
+  private accessToken = "";
+  private presenceStatus: PresenceStatus = "afk";
   private loginOpen = true;
   private money = 0;
   private moneyHud?: HTMLDivElement;
@@ -55,28 +94,14 @@ class WalkScene extends Phaser.Scene {
   // 今後、環境音/BGMファイルを追加したらここへ key -> URL を登録する。
   private readonly audioAssets: Record<string,string> = {};
 
-  // 種族固有の隠しパラメータ。UIには表示しない。
-  // テディぐまを基準速度とし、いにしえロボットは「気持ちだけ」速い。
-  private readonly raceData = {
-    teddy: {
-      texturePrefix:"teddy",
-      moveSpeed:168,
-      sizeClass:"standard",
-      visualScale:1.0
-    },
-    "ancient-robot": {
-      texturePrefix:"ancient-robot",
-      moveSpeed:176,
-      sizeClass:"standard",
-      visualScale:1.0
-    },
-    "rabbit-jk": {
-      texturePrefix:"rabbit-jk",
-      moveSpeed:168,
-      sizeClass:"standard",
-      visualScale:1.0
-    }
-  } as const;
+  // Shared World Core の races をログイン時に読み込み、このfallback値を上書きする。
+  // sprite asset 自体は CHARACTER_SPRITE_SPEC.md の既存3種族を使用する。
+  private readonly raceData: Record<string, RuntimeRaceData> = {
+    teddy: { texturePrefix:"teddy", moveSpeed:168, sizeClass:"standard", visualScale:1.0 },
+    "ancient-robot": { texturePrefix:"ancient-robot", moveSpeed:176, sizeClass:"standard", visualScale:1.0 },
+    "rabbit-jk": { texturePrefix:"rabbit-jk", moveSpeed:168, sizeClass:"standard", visualScale:1.0 }
+  };
+  private readonly supportedSpriteRaces = new Set(["teddy", "ancient-robot", "rabbit-jk"]);
 
   private readonly mapData: Record<MapId,MapDefinition> = {
     yunagicho: {
@@ -95,10 +120,38 @@ class WalkScene extends Phaser.Scene {
 
   constructor() { super("walk"); }
 
-  private getRaceData(race:string) {
-    if(race === "ancient-robot") return this.raceData["ancient-robot"];
-    if(race === "rabbit-jk") return this.raceData["rabbit-jk"];
-    return this.raceData.teddy;
+  private getRaceData(race:string): RuntimeRaceData {
+    return this.raceData[race] ?? this.raceData.teddy;
+  }
+
+  private applyRaceMasters(races:RaceMaster[]) {
+    for(const race of races){
+      if(!this.supportedSpriteRaces.has(race.race_id)) continue;
+      this.raceData[race.race_id]={
+        texturePrefix:race.sprite_key,
+        moveSpeed:race.move_speed,
+        sizeClass:"standard",
+        visualScale:race.visual_scale
+      };
+    }
+  }
+
+  private normalizeStatus(value:unknown):PresenceStatus {
+    return value === "studying" || value === "reading" || value === "busy" ? value : "afk";
+  }
+
+  private statusLabel(status:PresenceStatus) {
+    return status === "studying" ? "勉強中" :
+      status === "reading" ? "読書中" :
+      status === "busy" ? "取り込み中" : "AFK";
+  }
+
+  private playerLabel(name:string,status:PresenceStatus) {
+    return `${name}　[${this.statusLabel(status)}]`;
+  }
+
+  private normalizeDirection(value:unknown):Direction {
+    return value === "up" || value === "left" || value === "right" ? value : "down";
   }
 
   private installInputIsolation() {
@@ -163,10 +216,10 @@ class WalkScene extends Phaser.Scene {
     }
 
     this.setupTouchControls();
-    this.setupLogin();
+    void this.setupLogin();
     this.setupCollisionMap();
 
-    this.mapTitle = this.add.text(18, 18, "夕凪町　18:42　β 0.47", {
+    this.mapTitle = this.add.text(18, 18, "夕凪町　18:42　β 0.49", {
       fontFamily: "serif", fontSize: "18px", color: "#fff4df",
       backgroundColor: "#2b243088", padding: { x:10, y:7 }
     }).setScrollFactor(0).setDepth(1000);
@@ -239,20 +292,28 @@ class WalkScene extends Phaser.Scene {
     g.fillStyle(0x563f68,.17); g.fillRect(0,0,1800,1200);
   }
 
-  private makePlayer(x:number,y:number,color:number,label:string,height=1,race="teddy") {
+  private makePlayer(
+    x:number,
+    y:number,
+    color:number,
+    label:string,
+    height=1,
+    race="teddy",
+    direction:Direction="down",
+    status:PresenceStatus="afk"
+  ) {
     const visual=this.add.container(0,0);
 
-    // 足元をプレイヤー座標そのものに固定。
-    // 旧図形キャラ・疑似影は完全撤去し、正式スプライトだけを表示する。
+    // Character coordinate is the feet. player-depth.ts Y-sorts these containers.
     const raceKey=this.getRaceData(race).texturePrefix;
-    const sprite=this.add.image(0,0,`${raceKey}-down-3`).setOrigin(.5,1);
+    const sprite=this.add.image(0,0,`${raceKey}-${direction}-3`).setOrigin(.5,1);
     const raceInfo=this.getRaceData(race);
     const targetHeight=84*raceInfo.visualScale;
     sprite.setScale(targetHeight/sprite.height);
     visual.add(sprite);
     visual.setScale(height);
 
-    const name=this.add.text(0,-88*height,label,{
+    const name=this.add.text(0,-88*height,this.playerLabel(label,status),{
       fontFamily:"sans-serif",fontSize:"11px",color:"#f8ead8",
       backgroundColor:"#29232d88",padding:{x:4,y:2}
     }).setOrigin(.5);
@@ -260,11 +321,13 @@ class WalkScene extends Phaser.Scene {
     const c=this.add.container(x,y,[visual,name]).setDepth(10);
     c.setData("visual",visual);
     c.setData("sprite",sprite);
+    c.setData("nameText",name);
     c.setData("phase",0);
-    c.setData("direction","down");
+    c.setData("direction",direction);
     c.setData("height",height);
     c.setData("race",race);
     c.setData("playerName",label);
+    c.setData("status",status);
     c.setData("remoteDX",0);
     c.setData("remoteDY",0);
     c.setData("movingUntil",0);
@@ -273,6 +336,19 @@ class WalkScene extends Phaser.Scene {
     c.setData("idleAnimStart",0);
     c.setData("nextIdleAnim",performance.now()+Phaser.Math.Between(4500,11000));
     return c;
+  }
+
+  private updatePlayerIdentity(
+    c:Phaser.GameObjects.Container,
+    name:string,
+    status:PresenceStatus,
+    direction?:Direction
+  ) {
+    c.setData("playerName",name);
+    c.setData("status",status);
+    if(direction) c.setData("direction",direction);
+    const nameText=c.getData("nameText") as Phaser.GameObjects.Text | undefined;
+    nameText?.setText(this.playerLabel(name,status));
   }
 
   private animateWalker(c:Phaser.GameObjects.Container,moving:boolean,dx=0,dy=0) {
@@ -365,156 +441,367 @@ class WalkScene extends Phaser.Scene {
   }
 
 
-  private setupLogin() {
+  private async setupLogin() {
     if (this.input.keyboard) this.input.keyboard.enabled = false;
+
     const overlay = document.createElement("div");
     Object.assign(overlay.style, {
       position:"fixed", inset:"0", zIndex:"20000",
       display:"flex", alignItems:"center", justifyContent:"center",
-      background:"rgba(20,18,24,.9)", fontFamily:"sans-serif"
+      background:"rgba(20,18,24,.92)", fontFamily:"sans-serif"
     } as Partial<CSSStyleDeclaration>);
 
     const panel = document.createElement("div");
     Object.assign(panel.style, {
-      width:"min(420px, calc(100vw - 32px))",
+      width:"min(440px, calc(100vw - 32px))",
       padding:"24px", borderRadius:"16px",
       background:"#2d2933", color:"#fff8e8",
       boxShadow:"0 18px 50px rgba(0,0,0,.35)"
+    } as Partial<CSSStyleDeclaration>);
+
+    const brand=document.createElement("div");
+    brand.textContent=GAME_TITLE;
+    Object.assign(brand.style,{
+      fontSize:"16px",fontWeight:"600",letterSpacing:".08em",opacity:".78",marginBottom:"7px"
     } as Partial<CSSStyleDeclaration>);
 
     const title = document.createElement("div");
     title.textContent = "夕凪町へ";
     Object.assign(title.style, {
       fontSize:"26px", fontWeight:"700", marginBottom:"18px"
-    });
-
-    const nameLabel = document.createElement("label");
-    nameLabel.textContent = "名前";
-    nameLabel.style.display = "block";
-    nameLabel.style.marginBottom = "6px";
-
-    const nameInput = document.createElement("input");
-    nameInput.type = "text";
-    nameInput.maxLength = 16;
-    nameInput.placeholder = "名前を入力";
-    Object.assign(nameInput.style, {
-      width:"100%", height:"42px", boxSizing:"border-box",
-      marginBottom:"18px", borderRadius:"10px",
-      border:"1px solid rgba(255,255,255,.2)",
-      background:"#211e27", color:"#fff",
-      padding:"0 12px", fontSize:"16px", outline:"none"
     } as Partial<CSSStyleDeclaration>);
 
-    const raceLabel=document.createElement("div");
-    raceLabel.textContent="種族";
-    raceLabel.style.marginBottom="8px";
-
-    const raceRow=document.createElement("div");
-    Object.assign(raceRow.style,{
-      display:"grid",gridTemplateColumns:"repeat(3, 1fr)",gap:"8px",marginBottom:"18px"
-    } as Partial<CSSStyleDeclaration>);
-    let selectedColor=0x60a5fa;
-    let selectedRace="teddy";
-    const raceButtons: HTMLButtonElement[]=[];
-    [
-      {label:"テディぐま",value:"teddy"},
-      {label:"いにしえロボット",value:"ancient-robot"},
-      {label:"うさぎjk",value:"rabbit-jk"}
-    ].forEach((item,idx)=>{
-      const b=document.createElement("button");
-      b.type="button";
-      b.textContent=item.label;
-      Object.assign(b.style,{
-        height:"48px",borderRadius:"10px",
-        border:idx===0 ? "2px solid #fff" : "2px solid rgba(255,255,255,.15)",
-        background:"#211e27",color:"#fff8e8",
-        fontSize:"14px",fontWeight:"700",cursor:"pointer"
-      } as Partial<CSSStyleDeclaration>);
-      b.onclick=()=>{
-        selectedRace=item.value;
-        raceButtons.forEach(x=>x.style.border="2px solid rgba(255,255,255,.15)");
-        b.style.border="2px solid #fff";
-      };
-      raceButtons.push(b);
-      raceRow.appendChild(b);
-    });
-
-    const heightLabel = document.createElement("div");
-    heightLabel.textContent = "背の高さ";
-    heightLabel.style.marginBottom = "8px";
-
-    const heightRow = document.createElement("div");
-    Object.assign(heightRow.style, {
-      display:"grid", gridTemplateColumns:"repeat(3, 1fr)",
-      gap:"8px", marginBottom:"20px"
+    const message=document.createElement("div");
+    Object.assign(message.style,{
+      minHeight:"20px",fontSize:"13px",lineHeight:"1.5",opacity:".82",marginBottom:"14px"
     } as Partial<CSSStyleDeclaration>);
 
-    let selectedHeight = 1;
-    const heightButtons: HTMLButtonElement[] = [];
-    [
-      {label:"低め", value:.9},
-      {label:"ふつう", value:1},
-      {label:"高め", value:1.1}
-    ].forEach((item, idx) => {
-      const b = document.createElement("button");
-      b.type = "button";
-      b.textContent = item.label;
-      Object.assign(b.style, {
-        height:"42px", borderRadius:"10px",
-        border: idx===1 ? "2px solid #fff" : "2px solid rgba(255,255,255,.15)",
-        background:"#211e27", color:"#fff8e8",
-        fontSize:"14px", cursor:"pointer"
-      } as Partial<CSSStyleDeclaration>);
-      b.onclick = () => {
-        selectedHeight = item.value;
-        heightButtons.forEach(x => x.style.border = "2px solid rgba(255,255,255,.15)");
-        b.style.border = "2px solid #fff";
-      };
-      heightButtons.push(b);
-      heightRow.appendChild(b);
-    });
+    const setMessage=(text:string,error=false)=>{
+      message.textContent=text;
+      message.style.color=error ? "#ffb7b7" : "#fff0cf";
+    };
 
-    const start = document.createElement("button");
-    start.type = "button";
-    start.textContent = "散歩をはじめる";
-    Object.assign(start.style, {
-      width:"100%", height:"46px", border:"0",
-      borderRadius:"12px", background:"#f2e7c8",
-      color:"#242027", fontSize:"16px",
-      fontWeight:"700", cursor:"pointer"
-    } as Partial<CSSStyleDeclaration>);
+    panel.append(brand,title,message);
+    overlay.appendChild(panel);
+    document.body.appendChild(overlay);
 
-    const begin = () => {
-      const entered = nameInput.value.trim();
-      this.playerName = entered || "WALKER";
-      this.playerColor = selectedColor;
-      this.playerHeight = selectedHeight;
-      this.playerRace = selectedRace;
+    const enterGame=(accessToken:string)=>{
+      this.accessToken=accessToken;
       overlay.remove();
-      this.loginOpen = false;
-      if (this.input.keyboard) this.input.keyboard.enabled = true;
+      this.loginOpen=false;
+      if(this.input.keyboard)this.input.keyboard.enabled=true;
       this.setupChat();
       this.applyMapAudio();
       this.setupOptions();
       this.setupMoneyHud();
-      // 教養クイズは一時停止中。UIを生成しない。
       this.connect();
     };
 
-    start.onclick = begin;
-    nameInput.addEventListener("keydown", (e) => {
-      if (e.key === "Enter") begin();
-    });
+    if(!sharedBackendEnabled || !supabase){
+      setMessage("共有バックエンド未設定のため互換モードで起動します。");
+      this.renderLegacyLogin(panel,enterGame);
+      return;
+    }
 
-    panel.append(
-      title, nameLabel, nameInput,
-      raceLabel, raceRow,
-      heightLabel, heightRow,
-      start
-    );
-    overlay.appendChild(panel);
-    document.body.appendChild(overlay);
-    nameInput.focus();
+    const showProfileStep=async()=>{
+      try{
+        setMessage("共通プロフィールを読み込み中…");
+        const session=await getCurrentSession();
+        if(!session){
+          this.renderAuthLogin(panel,setMessage,showProfileStep);
+          return;
+        }
+
+        this.authUserId=session.user.id;
+        this.accessToken=session.access_token;
+        const [profile,races,presence]=await Promise.all([
+          ensureProfile(session.user),
+          loadRaceMasters(),
+          loadPresenceStatus(session.user.id)
+        ]);
+        this.applyRaceMasters(races);
+        this.presenceStatus=presence;
+
+        this.renderSharedProfileStep(
+          panel,
+          setMessage,
+          profile,
+          races,
+          presence,
+          async(displayName,raceId,status)=>{
+            const saved=await saveProfile(session.user.id,displayName,raceId);
+            await savePresenceStatus(session.user.id,status);
+            const currentSession=await getCurrentSession();
+            if(!currentSession)throw new Error("認証セッションが見つかりません。再ログインしてください。");
+
+            this.playerName=saved.display_name;
+            this.playerRace=saved.race_id || raceId;
+            this.playerHeight=1;
+            this.playerColor=0x60a5fa;
+            this.presenceStatus=status;
+            enterGame(currentSession.access_token);
+          }
+        );
+      }catch(error){
+        console.error(error);
+        setMessage(error instanceof Error ? error.message : "プロフィールの読み込みに失敗しました。",true);
+      }
+    };
+
+    await showProfileStep();
+  }
+
+  private clearLoginStep(panel:HTMLDivElement) {
+    Array.from(panel.querySelectorAll("[data-login-step]")).forEach((node)=>node.remove());
+  }
+
+  private renderAuthLogin(
+    panel:HTMLDivElement,
+    setMessage:(text:string,error?:boolean)=>void,
+    onAuthenticated:()=>Promise<void>
+  ) {
+    this.clearLoginStep(panel);
+    const wrap=document.createElement("div");
+    wrap.dataset.loginStep="auth";
+
+    const email=document.createElement("input");
+    email.type="email";
+    email.placeholder="メールアドレス";
+    email.autocomplete="email";
+    const password=document.createElement("input");
+    password.type="password";
+    password.placeholder="パスワード";
+    password.autocomplete="current-password";
+
+    for(const input of [email,password]){
+      Object.assign(input.style,{
+        width:"100%",height:"42px",boxSizing:"border-box",marginBottom:"10px",borderRadius:"10px",
+        border:"1px solid rgba(255,255,255,.2)",background:"#211e27",color:"#fff",padding:"0 12px",
+        fontSize:"15px",outline:"none"
+      } as Partial<CSSStyleDeclaration>);
+    }
+
+    const row=document.createElement("div");
+    Object.assign(row.style,{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"8px",marginBottom:"10px"} as Partial<CSSStyleDeclaration>);
+    const login=document.createElement("button");
+    login.type="button";
+    login.textContent="ログイン";
+    const signup=document.createElement("button");
+    signup.type="button";
+    signup.textContent="新規登録";
+    for(const button of [login,signup]){
+      Object.assign(button.style,{
+        height:"42px",borderRadius:"10px",border:"1px solid rgba(255,255,255,.2)",
+        background:"#f2e7c8",color:"#242027",fontWeight:"700",cursor:"pointer"
+      } as Partial<CSSStyleDeclaration>);
+    }
+    row.append(login,signup);
+
+    const google=document.createElement("button");
+    google.type="button";
+    google.textContent="Googleでログイン";
+    Object.assign(google.style,{
+      width:"100%",height:"44px",borderRadius:"10px",border:"1px solid rgba(255,255,255,.25)",
+      background:"#211e27",color:"#fff8e8",fontWeight:"700",cursor:"pointer"
+    } as Partial<CSSStyleDeclaration>);
+
+    const setDisabled=(value:boolean)=>{
+      login.disabled=value;signup.disabled=value;google.disabled=value;
+    };
+    const run=async(action:()=>Promise<void>)=>{
+      try{
+        setMessage("認証中…");
+        setDisabled(true);
+        await action();
+      }catch(error){
+        console.error(error);
+        setMessage(error instanceof Error ? error.message : "認証に失敗しました。",true);
+      }finally{
+        setDisabled(false);
+      }
+    };
+
+    login.onclick=()=>void run(async()=>{
+      if(!email.value.trim()||!password.value)throw new Error("メールアドレスとパスワードを入力してください。");
+      await signInWithEmail(email.value.trim(),password.value);
+      await onAuthenticated();
+    });
+    signup.onclick=()=>void run(async()=>{
+      if(!email.value.trim()||password.value.length<6)throw new Error("メールアドレスと6文字以上のパスワードを入力してください。");
+      const session=await signUpWithEmail(email.value.trim(),password.value);
+      if(session){
+        await onAuthenticated();
+      }else{
+        setMessage("確認メールを送信しました。メール内のリンクから認証してください。");
+      }
+    });
+    google.onclick=()=>void run(signInWithGoogle);
+
+    const submitOnEnter=(event:KeyboardEvent)=>{
+      if(event.key!=="Enter")return;
+      event.preventDefault();
+      login.click();
+    };
+    email.addEventListener("keydown",submitOnEnter);
+    password.addEventListener("keydown",submitOnEnter);
+
+    wrap.append(email,password,row,google);
+    panel.appendChild(wrap);
+    setMessage("共通アカウントでログインしてください。");
+    email.focus();
+  }
+
+  private renderSharedProfileStep(
+    panel:HTMLDivElement,
+    setMessage:(text:string,error?:boolean)=>void,
+    profile:{display_name:string;race_id:string|null},
+    races:RaceMaster[],
+    presence:PresenceStatus,
+    onStart:(displayName:string,raceId:string,status:PresenceStatus)=>Promise<void>
+  ) {
+    this.clearLoginStep(panel);
+    const wrap=document.createElement("div");
+    wrap.dataset.loginStep="profile";
+
+    const nameLabel=document.createElement("label");
+    nameLabel.textContent="表示名";
+    nameLabel.style.display="block";
+    nameLabel.style.marginBottom="6px";
+    const nameInput=document.createElement("input");
+    nameInput.type="text";
+    nameInput.maxLength=20;
+    nameInput.value=profile.display_name;
+    Object.assign(nameInput.style,{
+      width:"100%",height:"42px",boxSizing:"border-box",marginBottom:"16px",borderRadius:"10px",
+      border:"1px solid rgba(255,255,255,.2)",background:"#211e27",color:"#fff",padding:"0 12px",fontSize:"16px"
+    } as Partial<CSSStyleDeclaration>);
+
+    const usableRaces=races.filter((race)=>this.supportedSpriteRaces.has(race.race_id));
+    const storedRace=usableRaces.find((race)=>race.race_id===profile.race_id) ?? null;
+    let selectedRace=storedRace?.race_id ?? "";
+
+    const raceLabel=document.createElement("div");
+    raceLabel.textContent=storedRace ? "種族" : "種族を選択";
+    raceLabel.style.marginBottom="8px";
+    const raceArea=document.createElement("div");
+    raceArea.style.marginBottom="16px";
+
+    if(storedRace){
+      const fixed=document.createElement("div");
+      fixed.textContent=storedRace.name_ja;
+      Object.assign(fixed.style,{
+        padding:"12px",borderRadius:"10px",background:"#211e27",border:"1px solid rgba(255,255,255,.15)",
+        fontWeight:"700"
+      } as Partial<CSSStyleDeclaration>);
+      raceArea.appendChild(fixed);
+    }else{
+      Object.assign(raceArea.style,{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:"8px"} as Partial<CSSStyleDeclaration>);
+      const raceButtons:HTMLButtonElement[]=[];
+      for(const race of usableRaces){
+        const button=document.createElement("button");
+        button.type="button";
+        button.textContent=race.name_ja;
+        Object.assign(button.style,{
+          minHeight:"48px",borderRadius:"10px",background:"#211e27",color:"#fff8e8",fontSize:"13px",
+          fontWeight:"700",cursor:"pointer",border:"2px solid rgba(255,255,255,.15)"
+        } as Partial<CSSStyleDeclaration>);
+        button.onclick=()=>{
+          selectedRace=race.race_id;
+          raceButtons.forEach((item)=>item.style.border="2px solid rgba(255,255,255,.15)");
+          button.style.border="2px solid #fff";
+        };
+        raceButtons.push(button);
+        raceArea.appendChild(button);
+      }
+    }
+
+    const statusLabel=document.createElement("label");
+    statusLabel.textContent="ステータス";
+    statusLabel.style.display="block";
+    statusLabel.style.marginBottom="6px";
+    const status=document.createElement("select");
+    for(const [value,label] of [["studying","勉強中"],["reading","読書中"],["busy","取り込み中"],["afk","AFK"]] as const){
+      const option=document.createElement("option");
+      option.value=value;
+      option.textContent=label;
+      option.selected=value===presence;
+      status.appendChild(option);
+    }
+    Object.assign(status.style,{
+      width:"100%",height:"42px",boxSizing:"border-box",marginBottom:"18px",borderRadius:"10px",
+      border:"1px solid rgba(255,255,255,.2)",background:"#211e27",color:"#fff",padding:"0 10px"
+    } as Partial<CSSStyleDeclaration>);
+
+    const start=document.createElement("button");
+    start.type="button";
+    start.textContent="散歩をはじめる";
+    Object.assign(start.style,{
+      width:"100%",height:"46px",border:"0",borderRadius:"12px",background:"#f2e7c8",color:"#242027",
+      fontSize:"16px",fontWeight:"700",cursor:"pointer"
+    } as Partial<CSSStyleDeclaration>);
+    start.onclick=()=>void(async()=>{
+      try{
+        if(!selectedRace)throw new Error("種族を選択してください。");
+        start.disabled=true;
+        setMessage("プロフィールを保存中…");
+        await onStart(nameInput.value,selectedRace,status.value as PresenceStatus);
+      }catch(error){
+        console.error(error);
+        setMessage(error instanceof Error ? error.message : "プロフィール保存に失敗しました。",true);
+        start.disabled=false;
+      }
+    })();
+
+    wrap.append(nameLabel,nameInput,raceLabel,raceArea,statusLabel,status,start);
+    panel.appendChild(wrap);
+    setMessage(storedRace ? "共通プロフィールを確認して散歩を始めます。" : "最初に共通種族を選んでください。");
+  }
+
+  private renderLegacyLogin(panel:HTMLDivElement,onStart:(accessToken:string)=>void) {
+    this.clearLoginStep(panel);
+    const wrap=document.createElement("div");
+    wrap.dataset.loginStep="legacy";
+
+    const name=document.createElement("input");
+    name.placeholder="名前";
+    name.maxLength=16;
+    Object.assign(name.style,{
+      width:"100%",height:"42px",boxSizing:"border-box",marginBottom:"12px",borderRadius:"10px",
+      background:"#211e27",color:"#fff",border:"1px solid #ffffff33",padding:"0 12px"
+    } as Partial<CSSStyleDeclaration>);
+
+    const race=document.createElement("select");
+    for(const [value,label] of [["teddy","テディぐま"],["ancient-robot","いにしえロボット"],["rabbit-jk","うさぎjk"]]){
+      const option=document.createElement("option");
+      option.value=value;
+      option.textContent=label;
+      race.appendChild(option);
+    }
+    Object.assign(race.style,{
+      width:"100%",height:"42px",boxSizing:"border-box",marginBottom:"16px",borderRadius:"10px",
+      background:"#211e27",color:"#fff",border:"1px solid #ffffff33",padding:"0 10px"
+    } as Partial<CSSStyleDeclaration>);
+
+    const start=document.createElement("button");
+    start.type="button";
+    start.textContent="散歩をはじめる";
+    Object.assign(start.style,{
+      width:"100%",height:"46px",border:0,borderRadius:"12px",background:"#f2e7c8",fontWeight:"700",cursor:"pointer"
+    } as Partial<CSSStyleDeclaration>);
+    const begin=()=>{
+      this.playerName=name.value.trim()||"WALKER";
+      this.playerRace=race.value;
+      this.playerHeight=1;
+      this.playerColor=0x60a5fa;
+      this.presenceStatus="afk";
+      onStart("");
+    };
+    start.onclick=begin;
+    name.addEventListener("keydown",(event)=>{if(event.key==="Enter")begin();});
+
+    wrap.append(name,race,start);
+    panel.appendChild(wrap);
+    name.focus();
   }
 
   private setupChatLog() {
@@ -534,7 +821,7 @@ class WalkScene extends Phaser.Scene {
   }
 
   private addChatLog(name:string,text:string) {
-    const cleanName=String(name||"WALKER").slice(0,16);
+    const cleanName=String(name||"WALKER").slice(0,20);
     const cleanText=String(text||"").slice(0,80);
     if(!cleanText)return;
     this.chatLines.push(`${cleanName}：${cleanText}`);
@@ -773,14 +1060,26 @@ class WalkScene extends Phaser.Scene {
     for(const p of players){
       if(p.id===this.meId) continue;
       visibleIds.add(p.id);
+      const direction=this.normalizeDirection(p.direction);
+      const status=this.normalizeStatus(p.status);
+      const race=p.race||"teddy";
       let other=this.others.get(p.id);
+
+      if(other && String(other.getData("race")||"teddy")!==race){
+        other.destroy(true);
+        this.others.delete(p.id);
+        other=undefined;
+      }
+
       if(!other){
-        other=this.makePlayer(p.x,p.y,p.color,p.name,p.height,p.race||"teddy");
+        other=this.makePlayer(p.x,p.y,p.color,p.name,p.height,race,direction,status);
         this.others.set(p.id,other);
       }else{
         other.setPosition(p.x,p.y);
+        this.updatePlayerIdentity(other,p.name,status,direction);
       }
     }
+
     for(const [id,other] of this.others){
       if(!visibleIds.has(id)){
         other.destroy(true);
@@ -827,26 +1126,61 @@ class WalkScene extends Phaser.Scene {
     const socket=new WebSocket(SERVER_URL);
     this.socket=socket;
 
-    socket.addEventListener("open",()=>{
+    socket.addEventListener("open",()=>void(async()=>{
       if(this.socket!==socket) return;
       this.reconnectAttempts=0;
+
+      let accessToken=this.accessToken;
+      if(sharedBackendEnabled && supabase){
+        try{
+          const session=await getCurrentSession();
+          if(!session)throw new Error("認証セッションが切れました。");
+          accessToken=session.access_token;
+          this.accessToken=accessToken;
+        }catch(error){
+          console.error(error);
+          socket.close();
+          return;
+        }
+      }
+
+      const direction=this.me
+        ? this.normalizeDirection(this.me.getData("direction"))
+        : "down";
+
       socket.send(JSON.stringify({
         type:"join",
+        accessToken,
+        resume:Boolean(this.me),
         name:this.playerName,
         color:this.playerColor,
-        height:this.playerHeight,
+        height:1,
         race:this.playerRace,
+        status:this.presenceStatus,
         map:this.currentMap,
         x:this.me ? Math.round(this.me.x) : undefined,
-        y:this.me ? Math.round(this.me.y) : undefined
+        y:this.me ? Math.round(this.me.y) : undefined,
+        direction
       }));
       this.startHeartbeat(socket);
-    });
+    })());
 
     socket.addEventListener("message",(event)=>{
       if(this.socket!==socket) return;
       let msg:any;
       try{ msg=JSON.parse(String(event.data)); }catch{ return; }
+
+      if(msg.type==="auth_error"){
+        console.error("Shared backend auth error:",msg.code||msg.message||"unknown");
+        this.stopHeartbeat();
+        this.loginOpen=true;
+        socket.close();
+        if(sharedBackendEnabled){
+          window.alert(msg.message || "認証に失敗しました。もう一度ログインしてください。");
+          void signOutShared().finally(()=>window.location.reload());
+        }
+        return;
+      }
 
       if(msg.type==="heartbeat_ack"){
         this.lastHeartbeatAck=performance.now();
@@ -857,15 +1191,33 @@ class WalkScene extends Phaser.Scene {
       }
 
       if(msg.type==="welcome"){
-        this.meId=msg.id;
+        if(sharedBackendEnabled && msg.authMode!=="supabase"){
+          console.error("Shared backend misconfiguration: client auth is enabled but server auth is not.");
+          window.alert("共有バックエンドのサーバー設定が未完了です。管理者に連絡してください。");
+          this.loginOpen=true;
+          socket.close();
+          return;
+        }
+
+        this.meId=String(msg.id);
         const p=msg.player as PlayerState;
+        this.playerName=p.name;
+        this.playerRace=p.race||"teddy";
+        this.playerHeight=1;
+        this.playerColor=p.color;
+        this.presenceStatus=this.normalizeStatus(p.status);
         if(p.map) this.currentMap=p.map;
+
         if(this.me) this.me.destroy(true);
-        this.me=this.makePlayer(p.x,p.y,p.color,p.name,p.height,p.race||"teddy");
+        this.me=this.makePlayer(
+          p.x,p.y,p.color,p.name,1,p.race||"teddy",
+          this.normalizeDirection(p.direction),this.presenceStatus
+        );
         this.background?.setTexture(this.mapData[this.currentMap].texture);
         this.background?.setDisplaySize(1536,864);
         this.setupCollisionMap();
         this.applyMapAudio();
+        this.updateMapTitle();
         this.cameras.main.startFollow(this.me,true,.08,.08);
         this.cameras.main.setBounds(0,0,1536,864);
         return;
@@ -878,9 +1230,22 @@ class WalkScene extends Phaser.Scene {
 
       if(msg.type==="join"){
         const p=msg.player as PlayerState;
-        if(p.id!==this.meId&&!this.others.has(p.id)) {
-          this.others.set(p.id,this.makePlayer(p.x,p.y,p.color,p.name,p.height,p.race||"teddy"));
+        if(p.id===this.meId)return;
+        const current=this.others.get(p.id);
+        if(current){
+          if(String(current.getData("race")||"teddy")!==p.race){
+            current.destroy(true);
+            this.others.delete(p.id);
+          }else{
+            current.setPosition(p.x,p.y);
+            this.updatePlayerIdentity(current,p.name,this.normalizeStatus(p.status),this.normalizeDirection(p.direction));
+            return;
+          }
         }
+        this.others.set(p.id,this.makePlayer(
+          p.x,p.y,p.color,p.name,p.height,p.race||"teddy",
+          this.normalizeDirection(p.direction),this.normalizeStatus(p.status)
+        ));
         return;
       }
 
@@ -893,7 +1258,20 @@ class WalkScene extends Phaser.Scene {
           const rdx=p.x-oldX, rdy=p.y-oldY;
           p.setData("remoteDX",rdx);
           p.setData("remoteDY",rdy);
+          if(msg.direction)p.setData("direction",this.normalizeDirection(msg.direction));
           p.setData("movingUntil",performance.now()+180);
+        }
+        return;
+      }
+
+      if(msg.type==="presence_update"){
+        const status=this.normalizeStatus(msg.status);
+        if(msg.id===this.meId){
+          this.presenceStatus=status;
+          if(this.me)this.updatePlayerIdentity(this.me,this.playerName,status);
+        }else{
+          const p=this.others.get(msg.id);
+          if(p)this.updatePlayerIdentity(p,String(p.getData("playerName")||"WALKER"),status);
         }
         return;
       }
@@ -917,6 +1295,11 @@ class WalkScene extends Phaser.Scene {
       if(msg.type==="leave"){
         const p=this.others.get(msg.id);
         if(p){ p.destroy(true); this.others.delete(msg.id); }
+        return;
+      }
+
+      if(msg.type==="logout_ack"){
+        socket.close(1000,"logout");
       }
     });
 
@@ -1064,27 +1447,118 @@ class WalkScene extends Phaser.Scene {
     const panel=document.createElement("div");
     Object.assign(panel.style,{display:"none",position:"fixed",inset:"0",zIndex:"40",
       background:"#0008",alignItems:"center",justifyContent:"center"});
-    panel.innerHTML=`<div style="width:min(360px,86vw);background:#181818;color:white;padding:24px;border:1px solid #ffffff33;border-radius:10px;font-family:system-ui">
-      <div style="font-size:20px;font-weight:700;margin-bottom:22px">OPTIONS</div>
-      <label style="display:flex;align-items:center;gap:9px;cursor:pointer">
-        <input id="nantoka-coords" type="checkbox"> 座標を表示
-      </label>
-      <div style="display:flex;gap:10px;margin-top:18px">
-        <button id="nantoka-close" style="flex:1;padding:10px">CLOSE</button>
-      </div></div>`;
+    const box=document.createElement("div");
+    Object.assign(box.style,{
+      width:"min(360px,86vw)",background:"#181818",color:"white",padding:"24px",
+      border:"1px solid #ffffff33",borderRadius:"10px",fontFamily:"system-ui"
+    } as Partial<CSSStyleDeclaration>);
+    const heading=document.createElement("div");
+    heading.textContent="OPTIONS";
+    Object.assign(heading.style,{fontSize:"20px",fontWeight:"700",marginBottom:"22px"});
+
+    const coordsLabel=document.createElement("label");
+    Object.assign(coordsLabel.style,{display:"flex",alignItems:"center",gap:"9px",cursor:"pointer"});
+    const coords=document.createElement("input");
+    coords.type="checkbox";
+    const coordsText=document.createTextNode("座標を表示");
+    coordsLabel.append(coords,coordsText);
+    box.append(heading,coordsLabel);
+
+    let statusSelect:HTMLSelectElement|undefined;
+    if(sharedBackendEnabled && this.authUserId){
+      const statusLabel=document.createElement("label");
+      statusLabel.textContent="ステータス";
+      statusLabel.style.display="block";
+      statusLabel.style.marginTop="18px";
+      statusLabel.style.marginBottom="6px";
+      statusSelect=document.createElement("select");
+      for(const [value,label] of [["studying","勉強中"],["reading","読書中"],["busy","取り込み中"],["afk","AFK"]] as const){
+        const option=document.createElement("option");
+        option.value=value;option.textContent=label;statusSelect.appendChild(option);
+      }
+      Object.assign(statusSelect.style,{
+        width:"100%",height:"40px",boxSizing:"border-box",borderRadius:"8px",
+        background:"#242424",color:"#fff",border:"1px solid #ffffff33",padding:"0 8px"
+      } as Partial<CSSStyleDeclaration>);
+      statusSelect.value=this.presenceStatus;
+      statusSelect.addEventListener("change",()=>{
+        const next=this.normalizeStatus(statusSelect?.value);
+        if(this.socket?.readyState!==WebSocket.OPEN){
+          statusSelect!.value=this.presenceStatus;
+          return;
+        }
+        this.socket.send(JSON.stringify({type:"status",status:next}));
+      });
+      box.append(statusLabel,statusSelect);
+    }
+
+    const actions=document.createElement("div");
+    Object.assign(actions.style,{display:"flex",gap:"10px",marginTop:"20px"});
+    const closeButton=document.createElement("button");
+    closeButton.textContent="CLOSE";
+    Object.assign(closeButton.style,{flex:"1",padding:"10px"});
+    actions.appendChild(closeButton);
+
+    if(sharedBackendEnabled && this.authUserId){
+      const logout=document.createElement("button");
+      logout.textContent="LOGOUT";
+      Object.assign(logout.style,{flex:"1",padding:"10px"});
+      logout.addEventListener("click",()=>void(async()=>{
+        logout.disabled=true;
+        this.loginOpen=true;
+        try{
+          const socket=this.socket;
+          if(socket?.readyState===WebSocket.OPEN){
+            await new Promise<void>((resolve)=>{
+              let settled=false;
+              const finish=()=>{if(settled)return;settled=true;resolve();};
+              const timer=window.setTimeout(finish,1500);
+              const onMessage=(event:MessageEvent)=>{
+                try{
+                  const msg=JSON.parse(String(event.data));
+                  if(msg.type!=="logout_ack")return;
+                  window.clearTimeout(timer);
+                  socket.removeEventListener("message",onMessage);
+                  finish();
+                }catch{}
+              };
+              socket.addEventListener("message",onMessage);
+              socket.send(JSON.stringify({type:"logout"}));
+            });
+          }
+          await signOutShared();
+        }finally{
+          window.location.reload();
+        }
+      })());
+      actions.appendChild(logout);
+    }
+
+    box.appendChild(actions);
+    panel.appendChild(box);
     document.body.appendChild(panel);
-    const coords=panel.querySelector("#nantoka-coords") as HTMLInputElement;
-    const sync=()=>{coords.checked=this.coordsVisible;};
-    sync();
+
+    const sync=()=>{
+      coords.checked=this.coordsVisible;
+      if(statusSelect)statusSelect.value=this.presenceStatus;
+    };
     coords.addEventListener("change",()=>{
       this.coordsVisible=coords.checked;
-      localStorage.setItem("nantoka-show-coords",this.coordsVisible ? "1" : "0");
+      localStorage.setItem("summer-end-3pm-show-coords",this.coordsVisible ? "1" : "0");
       if(this.coordHud)this.coordHud.style.display=this.coordsVisible ? "block" : "none";
     });
     const close=()=>panel.style.display="none";
-    panel.querySelector("#nantoka-close")?.addEventListener("click",close);
+    closeButton.addEventListener("click",close);
     button.addEventListener("click",()=>{sync();panel.style.display="flex";});
-    panel.addEventListener("click",(e)=>{if(e.target===panel)close();});
+    panel.addEventListener("click",(event)=>{if(event.target===panel)close();});
+  }
+
+  private updateMapTitle() {
+    this.mapTitle?.setText(
+      this.currentMap==="yunagicho" ? "夕凪町　18:42　β 0.49" :
+      this.currentMap==="komorebi" ? "木漏れ日神社　β 0.49" :
+      "コンビニ　β 0.49"
+    );
   }
 
   private setupImageField() {
@@ -1105,14 +1579,16 @@ class WalkScene extends Phaser.Scene {
     for(const other of this.others.values()) other.destroy(true);
     this.others.clear();
     this.me.setPosition(x,y);
-    this.mapTitle?.setText(
-      map==="yunagicho" ? "夕凪町　18:42　β 0.47" :
-      map==="komorebi" ? "木漏れ日神社　β 0.47" :
-      "コンビニ　β 0.47"
-    );
+    this.updateMapTitle();
     if(map!=="yunagicho" && this.quizPanel?.style.display!=="none") this.closeTownQuiz("");
     if(this.socket?.readyState===WebSocket.OPEN){
-      this.socket.send(JSON.stringify({type:"move",x:Math.round(x),y:Math.round(y),map}));
+      this.socket.send(JSON.stringify({
+        type:"move",
+        x:Math.round(x),
+        y:Math.round(y),
+        map,
+        direction:this.normalizeDirection(this.me.getData("direction"))
+      }));
     }
     this.time.delayedCall(700,()=>this.transitionLock=false);
   }
@@ -1214,7 +1690,9 @@ class WalkScene extends Phaser.Scene {
         this.socket.send(JSON.stringify({
           type:"move",
           x:Math.round(this.me.x),
-          y:Math.round(this.me.y)
+          y:Math.round(this.me.y),
+          map:this.currentMap,
+          direction:this.normalizeDirection(this.me.getData("direction"))
         }));
         this.lastSent=time;
       }
