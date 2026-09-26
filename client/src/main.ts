@@ -92,7 +92,9 @@ class WalkScene extends Phaser.Scene {
   private activeMapAmbience: Phaser.Sound.BaseSound[] = [];
 
   // 今後、環境音/BGMファイルを追加したらここへ key -> URL を登録する。
-  private readonly audioAssets: Record<string,string> = {};
+  private readonly audioAssets: Record<string,string> = {
+    "convenience-night-ambience": "/audio/convenience-night-ambience-17064.mp3"
+  };
 
   // Shared World Core の races をログイン時に読み込み、このfallback値を上書きする。
   // sprite asset 自体は CHARACTER_SPRITE_SPEC.md の既存3種族を使用する。
@@ -114,7 +116,7 @@ class WalkScene extends Phaser.Scene {
     },
     convenience: {
       name:"コンビニ", texture:"convenience-field", quiz:false,
-      audio:{ bgmKey:null, ambienceKeys:[] }
+      audio:{ bgmKey:"convenience-night-ambience", ambienceKeys:[] }
     }
   };
 
@@ -220,7 +222,7 @@ class WalkScene extends Phaser.Scene {
     void this.setupLogin();
     this.setupCollisionMap();
 
-    this.mapTitle = this.add.text(18, 18, "夕凪町　18:42　β 0.50", {
+    this.mapTitle = this.add.text(18, 18, "夕凪町　18:42　β 0.51", {
       fontFamily: "serif", fontSize: "18px", color: "#fff4df",
       backgroundColor: "#2b243088", padding: { x:10, y:7 }
     }).setScrollFactor(0).setDepth(1000);
@@ -1483,6 +1485,19 @@ for(const race of usableRaces){
       box.append(statusLabel,statusSelect);
     }
 
+    const credits=document.createElement("div");
+    Object.assign(credits.style,{marginTop:"18px",paddingTop:"14px",borderTop:"1px solid #ffffff22",fontSize:"11px",lineHeight:"1.5",opacity:".72"} as Partial<CSSStyleDeclaration>);
+    const creditTitle=document.createElement("div");
+    creditTitle.textContent="BGM: Night Ambience — cclaretc (Freesound) / Pixabay";
+    const creditLink=document.createElement("a");
+    creditLink.href="https://pixabay.com/sound-effects/nature-night-ambience-17064/";
+    creditLink.target="_blank";
+    creditLink.rel="noopener noreferrer";
+    creditLink.textContent="Pixabay";
+    Object.assign(creditLink.style,{color:"#fff",opacity:".9"} as Partial<CSSStyleDeclaration>);
+    credits.append(creditTitle,creditLink);
+    box.appendChild(credits);
+
     const actions=document.createElement("div");
     Object.assign(actions.style,{display:"flex",gap:"10px",marginTop:"20px"});
     const closeButton=document.createElement("button");
@@ -1546,9 +1561,9 @@ for(const race of usableRaces){
 
   private updateMapTitle() {
     this.mapTitle?.setText(
-      this.currentMap==="yunagicho" ? "夕凪町　18:42　β 0.50" :
-      this.currentMap==="komorebi" ? "木漏れ日神社　β 0.50" :
-      "コンビニ　β 0.50"
+      this.currentMap==="yunagicho" ? "夕凪町　18:42　β 0.51" :
+      this.currentMap==="komorebi" ? "木漏れ日神社　β 0.51" :
+      "コンビニ　β 0.51"
     );
   }
 

@@ -1,10 +1,10 @@
-# 午後三時、夏の果。 — 実装仕様（現行）
+# 午後三時、夏の果て — 実装仕様（現行）
 
-更新: 2026-09-26 / β 0.50
+更新: 2026-09-26 / β 0.51
 
 ## 1. 作品
 
-正式名称は **「午後三時、夏の果。」**。末尾の「。」を含む。
+正式名称は **「午後三時、夏の果て」**。末尾の「。」を含む。
 
 2Dオンライン空間を歩き、世界そのものに滞在することを中心にする。ブラウザを第一ターゲットとし、現在は Phaser 3 + TypeScript + Vite + Node.js + `ws` で構成する。
 
@@ -44,7 +44,7 @@ Shared World Core の `profiles.race_id -> races.race_id` を共通種族とし�
 - `supabase/migrations/001_initial_schema.sql`
 - `supabase/seed.sql`
 
-本リポジトリの `docs/SHARED_BACKEND.md` は「午後三時、夏の果。」側の利用方法だけを定義する。
+本リポジトリの `docs/SHARED_BACKEND.md` は「午後三時、夏の果て」側の利用方法だけを定義する。
 
 ## 5. 認証と共通人格
 
@@ -177,3 +177,9 @@ Shared World Core統合を変更する場合は少なくとも次を確認する
 - 2人同時接続、heartbeat snapshot、reconnect、chat、3マップ、Y-sortを維持
 
 成果物/commit前に独立した2回の検証を行う。
+
+
+## Audio credits
+
+- コンビニBGM: **Night Ambience** — cclaretc (Freesound) / Pixabay
+- https://pixabay.com/sound-effects/nature-night-ambience-17064/

@@ -1,4 +1,4 @@
-# 午後三時、夏の果。 — Documentation
+# 午後三時、夏の果て — Documentation
 
 2026-09-26以降、仕様・技術判断はGitHub上の文書を正本とする。
 

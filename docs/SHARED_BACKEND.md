@@ -1,6 +1,6 @@
-# 午後三時、夏の果。 — Shared World Core Integration
+# 午後三時、夏の果て — Shared World Core Integration
 
-更新: 2026-09-26 / β 0.50
+更新: 2026-09-26 / β 0.51
 
 ## Source of Truth
 
