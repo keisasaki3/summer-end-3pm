@@ -1,0 +1,195 @@
+          players.set(player.id, player);
+          joined = true;
+
+          if (oldSocket && oldSocket !== socket) {
+            oldSocket.superseded = true;
+            try { oldSocket.close(4000, "replaced by newer connection"); } catch {}
+          }
+
+          touchPlayerPresence(player);
+        } else {
+          const name = typeof msg.name === "string" ? msg.name.trim().slice(0, 20) : "WALKER";
+          player.name = name || "WALKER";
+          player.color = 0x60a5fa;
+          player.height = 1;
+          player.map = normalizeMap(msg.map, "yunagicho");
+          if (Number.isFinite(msg.x)) player.x = clampX(msg.x);
+          if (Number.isFinite(msg.y)) player.y = clampY(msg.y);
+          player.direction = normalizeDirection(msg.direction, "down");
+          player.status = sharedBackend.normalizeStatus(msg.status);
+          player.race = msg.race === "ancient-robot" ? "ancient-robot" : msg.race === "rabbit-jk" ? "rabbit-jk" : "teddy";
+          socket.playerId = player.id;
+          activeSockets.set(player.id, socket);
+          players.set(player.id, player);
+          joined = true;
+        }
+
+        sendJson(socket, { type: "welcome", id: player.id, player: serializePlayer(player), authMode: sharedBackend.enabled ? "supabase" : "legacy" });
+        sendJson(socket, { type: "money", amount: player.money });
+        sendJson(socket, { type: "snapshot", players: visiblePlayers(player.map, player.id) });
+        broadcastMap(player.map,{ type: "join", player: serializePlayer(player) }, socket);
+        if(QUIZ_ENABLED && activeQuiz && player.map==="yunagicho"){
+          sendJson(socket,{type:"town_quiz",id:activeQuiz.id,question:activeQuiz.item.q,options:activeQuiz.item.o,durationMs:QUIZ_DURATION_MS});
+        }
+      } catch (error) {
+        console.error("[shared-backend] join failed", error);
+        sendJson(socket, {
+          type: "auth_error",
+          code: error?.code || "AUTH_FAILED",
+          message: error?.message || "認証に失敗しました。",
+        });
+        try { socket.close(4001, "authentication failed"); } catch {}
+      } finally {
+        joining = false;
+      }
+      return;
+    }
+
+    if (!joined || activeSockets.get(player.id) !== socket) return;
+
+    if (msg.type === "heartbeat") {
+      touchPlayerPresence(player);
+      sendJson(socket,{
+        type:"heartbeat_ack",
+        ts:Date.now(),
+        map:player.map,
+        players:visiblePlayers(player.map, player.id)
+      });
+      return;
+    }
+
+    if (msg.type === "logout") {
+      await persistPlayerState(player, true);
+      if (player.authenticated) {
+        try { await sharedBackend.touchPresence(player.id, player.status); } catch (error) {
+          console.error("[shared-backend] logout presence save failed", error);
+        }
+      }
+      sendJson(socket,{type:"logout_ack"});
+      setTimeout(()=>{ try { socket.close(1000,"logout"); } catch {} },25);
+      return;
+    }
+
+    if (msg.type === "status") {
+      const nextStatus = sharedBackend.normalizeStatus(msg.status);
+      if (player.authenticated) {
+        try {
+          player.status = await sharedBackend.setPresenceStatus(player.id, nextStatus);
+          player.lastPresenceTouchAt = Date.now();
+        } catch (error) {
+          console.error("[shared-backend] status update failed", error);
+          return;
+        }
+      } else {
+        player.status = nextStatus;
+      }
+      broadcastMap(player.map,{ type:"presence_update", id:player.id, status:player.status });
+      return;
+    }
+
+    if (msg.type === "quiz_answer") {
+      if (!QUIZ_ENABLED) return;
+      if (player.map !== "yunagicho") return;
+      if (!activeQuiz || String(msg.id) !== activeQuiz.id || quizAnswered.has(player.id)) return;
+      const answer = Number(msg.answer);
+      if (!Number.isInteger(answer) || answer < 0 || answer > 3) return;
+      quizAnswered.add(player.id);
+      const correct = answer === activeQuiz.item.a;
+      if (correct) player.money += 100;
+      sendJson(socket,{type:"quiz_result",id:activeQuiz.id,correct,
+        correctText:activeQuiz.item.o[activeQuiz.item.a],money:player.money});
+      return;
+    }
+
+    if (msg.type === "chat") {
+      const text = typeof msg.text === "string" ? msg.text.trim().slice(0, 80) : "";
+      if (!text) return;
+      broadcastMap(player.map,{ type: "chat", id: player.id, text }, socket);
+      return;
+    }
+
+    if (msg.type !== "move") return;
+    if (!Number.isFinite(msg.x) || !Number.isFinite(msg.y)) return;
+
+    const requestedMap = normalizeMap(msg.map, player.map);
+    const oldMap = player.map;
+    const nextDirection = normalizeDirection(msg.direction, player.direction);
+
+    if (requestedMap !== oldMap) {
+      broadcastMap(oldMap,{type:"leave",id:player.id},socket);
+      player.map = requestedMap;
+      player.x = clampX(msg.x);
+      player.y = clampY(msg.y);
+      player.direction = nextDirection;
+      markStateDirty(player);
+      await persistPlayerState(player, true);
+      sendJson(socket,{type:"map_snapshot",map:player.map,players:visiblePlayers(player.map,player.id)});
+      broadcastMap(player.map,{type:"join",player:serializePlayer(player)},socket);
+      if(QUIZ_ENABLED && player.map==="yunagicho" && activeQuiz){
+        sendJson(socket,{type:"town_quiz",id:activeQuiz.id,question:activeQuiz.item.q,
+          options:activeQuiz.item.o,durationMs:QUIZ_DURATION_MS});
+      }
+      return;
+    }
+
+    player.x = clampX(msg.x);
+    player.y = clampY(msg.y);
+    player.direction = nextDirection;
+    markStateDirty(player);
+    broadcastMap(player.map,{ type: "move", id: player.id, x: player.x, y: player.y, map:player.map, direction:player.direction }, socket);
+  });
+
+  socket.on("close", () => {
+    if (!joined) return;
+    if (activeSockets.get(player.id) !== socket) return;
+    activeSockets.delete(player.id);
+    players.delete(player.id);
+    broadcastMap(player.map,{ type: "leave", id: player.id });
+    void persistPlayerState(player, true);
+    if (player.authenticated) {
+      void sharedBackend.touchPresence(player.id, player.status).catch((error) => {
+        console.error("[shared-backend] disconnect presence save failed", error);
+      });
+    }
+  });
+});
+
+const durableStateTimer = setInterval(()=>{
+  for (const player of players.values()) {
+    if (!player.authenticated || !player.stateDirty) continue;
+    void persistPlayerState(player, false);
+  }
+},5000);
+
+const websocketKeepAlive = setInterval(()=>{
+  for(const client of wss.clients){
+    if(client.isAlive===false){
+      client.terminate();
+      continue;
+    }
+    client.isAlive=false;
+    try{ client.ping(); }catch{}
+  }
+},25000);
+
+wss.on("close",()=>{
+  clearInterval(websocketKeepAlive);
+  clearInterval(durableStateTimer);
+});
+
+if (QUIZ_ENABLED) {
+  setTimeout(startTownQuiz, 15000);
+  setInterval(startTownQuiz, QUIZ_INTERVAL_MS);
+}
+
+server.listen(PORT, "0.0.0.0", () => {
+  console.log("");
+  console.log("午後三時、夏の果。 β 0.49");
+  console.log(`Server: http://localhost:${PORT}`);
+  console.log(`Mode: ${DEV ? "development websocket-only" : "production single-URL"}`);
+  console.log(`Shared backend: ${sharedBackend.enabled ? "Supabase" : "legacy compatibility"}`);
+  if (!DEV) {
+    console.log("Game + WebSocket are served from the same port.");
+  }
+  console.log("");
+});
