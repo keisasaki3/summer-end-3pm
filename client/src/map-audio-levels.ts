@@ -6,7 +6,7 @@ export type AudioMapId = "yunagicho" | "komorebi" | "convenience";
 // calibrated once without changing the user's master-volume behavior.
 export const MAP_AUDIO_GAIN: Record<AudioMapId, number> = {
   yunagicho: 1.0,
-  komorebi: 0.42,
+  komorebi: 0.25,
   convenience: 1.0,
 };
 
