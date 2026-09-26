@@ -1,39 +1,209 @@
 import Phaser from "phaser";
-import { getMapAudioGainForKey } from "./map-audio-levels";
+import { getMapAudioGainForKey, isMapAudioKey } from "./map-audio-levels";
 
 // Keep the game's looping map audio alive when the browser tab/window loses focus.
 // Phaser pauses audio on blur by default, and Web Audio is more likely to be
 // suspended by browsers in the background, so use HTML5 Audio for map ambience.
 const phaserRuntime = Phaser as any;
 
-// Apply map-specific loudness compensation at the sound-object boundary.
-// main.ts can keep treating its volume as the user's master volume; every
-// mapped ambience sound automatically receives:
-//   effective volume = master volume * per-map gain
-// This also covers later volume-slider changes because setVolume is wrapped.
+const clamp01 = (value: number) => Math.min(1, Math.max(0, value));
+const LOOP_OVERLAP_SECONDS = 1.35;
+const CROSSFADE_MS = 650;
+const LOOP_MONITOR_MS = 100;
+
 const html5ManagerProto = phaserRuntime.Sound?.HTML5AudioSoundManager?.prototype as any;
-if (html5ManagerProto && !html5ManagerProto.__summerEndMapGainPatched) {
+if (html5ManagerProto && !html5ManagerProto.__summerEndSeamlessLoopPatched) {
   const originalAdd = html5ManagerProto.add;
 
-  html5ManagerProto.add = function addWithMapGain(key: unknown, config?: Record<string, unknown>) {
-    const sound = originalAdd.call(this, key, config);
-    if (!sound || typeof sound.setVolume !== "function") return sound;
+  html5ManagerProto.add = function addWithSeamlessMapLoop(
+    key: unknown,
+    config?: Record<string, unknown>
+  ) {
+    const audioKey = String(key);
 
-    const mapGain = getMapAudioGainForKey(String(key));
-    const rawSetVolume = sound.setVolume.bind(sound);
-    const clamp = (value: number) => Math.min(1, Math.max(0, value));
+    // Ordinary/non-map sounds keep Phaser's normal behavior.
+    if (!isMapAudioKey(audioKey)) {
+      return originalAdd.call(this, key, config);
+    }
 
-    sound.setVolume = (masterVolume: number) =>
-      rawSetVolume(clamp(Number(masterVolume) * mapGain));
+    // MP3 files can contain encoder padding at their boundaries. A single
+    // HTML5 Audio element with loop=true can therefore expose a short gap.
+    // Use two independent Phaser HTML5 sound instances and overlap/crossfade
+    // them before the current copy reaches its encoded end.
+    const childConfig = {
+      ...(config ?? {}),
+      loop: false,
+      volume: 0,
+    };
+    const sounds = [
+      originalAdd.call(this, key, childConfig),
+      originalAdd.call(this, key, childConfig),
+    ] as any[];
 
-    // The constructor has already consumed config.volume before the wrapper was
-    // installed, so re-apply it once through the calibrated path before play().
-    const initialMasterVolume = Number(config?.volume ?? sound.volume ?? 1);
-    sound.setVolume(Number.isFinite(initialMasterVolume) ? initialMasterVolume : 1);
-    return sound;
+    const mapGain = getMapAudioGainForKey(audioKey);
+    let masterVolume = Number(config?.volume ?? 1);
+    if (!Number.isFinite(masterVolume)) masterVolume = 1;
+    masterVolume = clamp01(masterVolume);
+
+    let running = false;
+    let activeIndex = 0;
+    let nextIndex = 1;
+    let crossfading = false;
+    let fadeStartedAt = 0;
+    let fadeProgress = 0;
+    let monitorTimer: number | undefined;
+
+    const targetVolume = () => clamp01(masterVolume * mapGain);
+
+    const setChildVolume = (index: number, value: number) => {
+      const sound = sounds[index];
+      if (sound && typeof sound.setVolume === "function") {
+        sound.setVolume(clamp01(value));
+      }
+    };
+
+    const applyCurrentVolumes = () => {
+      const target = targetVolume();
+      if (!crossfading) {
+        setChildVolume(activeIndex, target);
+        setChildVolume(1 - activeIndex, 0);
+        return;
+      }
+      setChildVolume(activeIndex, target * (1 - fadeProgress));
+      setChildVolume(nextIndex, target * fadeProgress);
+    };
+
+    const finishCrossfade = () => {
+      if (!crossfading) return;
+      const oldIndex = activeIndex;
+      activeIndex = nextIndex;
+      nextIndex = 1 - activeIndex;
+      crossfading = false;
+      fadeProgress = 0;
+      sounds[oldIndex]?.stop?.();
+      setChildVolume(oldIndex, 0);
+      setChildVolume(activeIndex, targetVolume());
+    };
+
+    const beginCrossfade = () => {
+      if (!running || crossfading) return;
+      nextIndex = 1 - activeIndex;
+      const next = sounds[nextIndex];
+      if (!next) return;
+
+      next.stop?.();
+      setChildVolume(nextIndex, 0);
+      next.play?.();
+      crossfading = true;
+      fadeStartedAt = performance.now();
+      fadeProgress = 0;
+    };
+
+    const recoverFromUnexpectedEnd = (endedIndex: number) => {
+      if (!running || endedIndex !== activeIndex) return;
+
+      if (crossfading) {
+        fadeProgress = 1;
+        applyCurrentVolumes();
+        finishCrossfade();
+        return;
+      }
+
+      // Fallback for aggressive browser timer throttling: if the overlap check
+      // missed the window completely, start the standby copy immediately.
+      nextIndex = 1 - activeIndex;
+      const next = sounds[nextIndex];
+      if (!next) return;
+      next.stop?.();
+      setChildVolume(nextIndex, targetVolume());
+      next.play?.();
+      activeIndex = nextIndex;
+      nextIndex = 1 - activeIndex;
+    };
+
+    sounds.forEach((sound, index) => {
+      sound?.on?.("complete", () => recoverFromUnexpectedEnd(index));
+    });
+
+    const monitor = () => {
+      if (!running) return;
+
+      if (crossfading) {
+        fadeProgress = clamp01((performance.now() - fadeStartedAt) / CROSSFADE_MS);
+        applyCurrentVolumes();
+        if (fadeProgress >= 1) finishCrossfade();
+        return;
+      }
+
+      const active = sounds[activeIndex];
+      const duration = Number(active?.duration ?? 0);
+      const seek = Number(active?.seek ?? 0);
+      if (
+        Number.isFinite(duration) &&
+        Number.isFinite(seek) &&
+        duration > LOOP_OVERLAP_SECONDS + 0.2 &&
+        duration - seek <= LOOP_OVERLAP_SECONDS
+      ) {
+        beginCrossfade();
+      }
+    };
+
+    const startMonitor = () => {
+      if (monitorTimer !== undefined) window.clearInterval(monitorTimer);
+      monitorTimer = window.setInterval(monitor, LOOP_MONITOR_MS);
+    };
+
+    const stopMonitor = () => {
+      if (monitorTimer !== undefined) {
+        window.clearInterval(monitorTimer);
+        monitorTimer = undefined;
+      }
+    };
+
+    const wrapper = {
+      play: () => {
+        running = true;
+        activeIndex = 0;
+        nextIndex = 1;
+        crossfading = false;
+        fadeProgress = 0;
+        sounds.forEach((sound) => sound?.stop?.());
+        setChildVolume(0, targetVolume());
+        setChildVolume(1, 0);
+        const result = sounds[0]?.play?.();
+        startMonitor();
+        return result;
+      },
+      stop: () => {
+        running = false;
+        crossfading = false;
+        fadeProgress = 0;
+        stopMonitor();
+        sounds.forEach((sound) => sound?.stop?.());
+        return wrapper;
+      },
+      destroy: () => {
+        wrapper.stop();
+        sounds.forEach((sound) => sound?.destroy?.());
+      },
+      setVolume: (value: number) => {
+        const nextMaster = Number(value);
+        masterVolume = Number.isFinite(nextMaster) ? clamp01(nextMaster) : masterVolume;
+        applyCurrentVolumes();
+        return wrapper;
+      },
+      get volume() {
+        return masterVolume;
+      },
+      get isPlaying() {
+        return running;
+      },
+    };
+
+    return wrapper;
   };
 
-  html5ManagerProto.__summerEndMapGainPatched = true;
+  html5ManagerProto.__summerEndSeamlessLoopPatched = true;
 }
 
 const OriginalGame = phaserRuntime.Game;
