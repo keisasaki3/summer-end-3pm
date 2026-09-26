@@ -1,0 +1,429 @@
+import Phaser from "phaser";
+import { GAME_TITLE } from "./branding";
+import {
+  ensureProfile,
+  getCurrentSession,
+  loadPresenceStatus,
+  loadRaceMasters,
+  savePresenceStatus,
+  saveProfile,
+  sharedBackendEnabled,
+  signInWithEmail,
+  signInWithGoogle,
+  signOutShared,
+  signUpWithEmail,
+  supabase,
+  type PresenceStatus,
+  type RaceMaster,
+} from "./shared-backend";
+
+const isViteDev = location.port === "5173";
+const SERVER_URL = isViteDev
+  ? `ws://${location.hostname}:8080`
+  : `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}`;
+
+type MapId = "yunagicho" | "komorebi" | "convenience";
+type Direction = "up" | "down" | "left" | "right";
+type MapAudioConfig = { bgmKey: string | null; ambienceKeys: string[] };
+type MapDefinition = { name: string; texture: string; quiz: boolean; audio: MapAudioConfig };
+type PlayerState = {
+  id: string;
+  x: number;
+  y: number;
+  color: number;
+  name: string;
+  height: number;
+  race: string;
+  map?: MapId;
+  direction?: Direction;
+  status?: PresenceStatus;
+};
+type RuntimeRaceData = {
+  texturePrefix: string;
+  moveSpeed: number;
+  sizeClass: "standard";
+  visualScale: number;
+};
+
+class WalkScene extends Phaser.Scene {
+  private meId = "";
+  private me?: Phaser.GameObjects.Container;
+  private others = new Map<string, Phaser.GameObjects.Container>();
+  private cursors?: Phaser.Types.Input.Keyboard.CursorKeys;
+  private keys?: Record<string, Phaser.Input.Keyboard.Key>;
+  private socket?: WebSocket;
+  private reconnectTimer?: number;
+  private heartbeatTimer?: number;
+  private reconnectAttempts = 0;
+  private lastHeartbeatAck = 0;
+  private lastSent = 0;
+
+  private joystick = { active:false, pointerId:-1, originX:0, originY:0, dx:0, dy:0 };
+  private chatInput?: HTMLInputElement;
+  private chatLog?: HTMLDivElement;
+  private chatLines: string[] = [];
+  private coordHud?: HTMLDivElement;
+  private coordsVisible = (
+    localStorage.getItem("summer-end-3pm-show-coords") ??
+    localStorage.getItem("nantoka-show-coords") ??
+    localStorage.getItem("vw-show-coords") ??
+    "1"
+  ) !== "0";
+  private playerName = "WALKER";
+  private playerColor = 0x60a5fa;
+  private playerHeight = 1;
+  private playerRace = "teddy";
+  private authUserId = "";
+  private accessToken = "";
+  private presenceStatus: PresenceStatus = "afk";
+  private loginOpen = true;
+  private money = 0;
+  private moneyHud?: HTMLDivElement;
+  private quizPanel?: HTMLDivElement;
+  private activeQuizId: string | null = null;
+  private rectBlockers: Phaser.Geom.Rectangle[] = [];
+  private circleBlockers: Phaser.Geom.Circle[] = [];
+  private polygonBlockers: Phaser.Geom.Polygon[] = [];
+  private currentMap: MapId = "yunagicho";
+  private background?: Phaser.GameObjects.Image;
+  private mapTitle?: Phaser.GameObjects.Text;
+  private transitionLock = false;
+  private activeMapBgm?: Phaser.Sound.BaseSound;
+  private activeMapAmbience: Phaser.Sound.BaseSound[] = [];
+
+  // 今後、環境音/BGMファイルを追加したらここへ key -> URL を登録する。
+  private readonly audioAssets: Record<string,string> = {};
+
+  // Shared World Core の races をログイン時に読み込み、このfallback値を上書きする。
+  // sprite asset 自体は CHARACTER_SPRITE_SPEC.md の既存3種族を使用する。
+  private readonly raceData: Record<string, RuntimeRaceData> = {
+    teddy: { texturePrefix:"teddy", moveSpeed:168, sizeClass:"standard", visualScale:1.0 },
+    "ancient-robot": { texturePrefix:"ancient-robot", moveSpeed:176, sizeClass:"standard", visualScale:1.0 },
+    "rabbit-jk": { texturePrefix:"rabbit-jk", moveSpeed:168, sizeClass:"standard", visualScale:1.0 }
+  };
+  private readonly supportedSpriteRaces = new Set(["teddy", "ancient-robot", "rabbit-jk"]);
+
+  private readonly mapData: Record<MapId,MapDefinition> = {
+    yunagicho: {
+      name:"夕凪町", texture:"yunagicho-field", quiz:false,
+      audio:{ bgmKey:null, ambienceKeys:[] }
+    },
+    komorebi: {
+      name:"木漏れ日神社", texture:"komorebi-field", quiz:false,
+      audio:{ bgmKey:null, ambienceKeys:[] }
+    },
+    convenience: {
+      name:"コンビニ", texture:"convenience-field", quiz:false,
+      audio:{ bgmKey:null, ambienceKeys:[] }
+    }
+  };
+
+  constructor() { super("walk"); }
+
+  private getRaceData(race:string): RuntimeRaceData {
+    return this.raceData[race] ?? this.raceData.teddy;
+  }
+
+  private applyRaceMasters(races:RaceMaster[]) {
+    for(const race of races){
+      if(!this.supportedSpriteRaces.has(race.race_id)) continue;
+      this.raceData[race.race_id]={
+        texturePrefix:race.sprite_key,
+        moveSpeed:race.move_speed,
+        sizeClass:"standard",
+        visualScale:race.visual_scale
+      };
+    }
+  }
+
+  private normalizeStatus(value:unknown):PresenceStatus {
+    return value === "studying" || value === "reading" || value === "busy" ? value : "afk";
+  }
+
+  private statusLabel(status:PresenceStatus) {
+    return status === "studying" ? "勉強中" :
+      status === "reading" ? "読書中" :
+      status === "busy" ? "取り込み中" : "AFK";
+  }
+
+  private playerLabel(name:string,status:PresenceStatus) {
+    return `${name}　[${this.statusLabel(status)}]`;
+  }
+
+  private normalizeDirection(value:unknown):Direction {
+    return value === "up" || value === "left" || value === "right" ? value : "down";
+  }
+
+  private installInputIsolation() {
+    const isEditor=(el: EventTarget | null)=>{
+      const h=el as HTMLElement | null;
+      return !!h && (h.tagName==="INPUT" || h.tagName==="TEXTAREA" || h.isContentEditable);
+    };
+    document.addEventListener("focusin",(e)=>{
+      if(isEditor(e.target) && this.input.keyboard){
+        this.input.keyboard.resetKeys();
+        this.input.keyboard.enabled=false;
+      }
+    });
+    document.addEventListener("focusout",(e)=>{
+      if(isEditor(e.target) && this.input.keyboard){
+        this.input.keyboard.resetKeys();
+        this.input.keyboard.enabled=true;
+      }
+    });
+  }
+
+  preload() {
+    this.load.image("yunagicho-field", "/yunagicho.png");
+    this.load.image("komorebi-field", "/komorebi-jinja.png");
+    this.load.image("convenience-field", "/convenience-store.png");
+    (["down","left","right","up"] as const).forEach(dir=>{
+      for(let i=0;i<7;i++){
+        this.load.image(`teddy-${dir}-${i}`,`/sprites/runtime/teddy/${dir}-${i}.png`);
+        this.load.image(`ancient-robot-${dir}-${i}`,`/sprites/runtime/ancient-robot/${dir}-${i}.png`);
+        this.load.image(`rabbit-jk-${dir}-${i}`,`/sprites/runtime/rabbit-jk/${dir}-${i}.png`);
+      }
+    });
+    for(const [key,url] of Object.entries(this.audioAssets)) {
+      this.load.audio(key,url);
+    }
+  }
+
+  create() {
+    this.installInputIsolation();
+    this.cameras.main.setBackgroundColor("#c88f72");
+    this.setupImageField();
+
+    if (this.input.keyboard) {
+      this.cursors = {
+        up: this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.UP, false),
+        down: this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.DOWN, false),
+        left: this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.LEFT, false),
+        right: this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.RIGHT, false),
+        space: this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE, false),
+        shift: this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.SHIFT, false)
+      } as Phaser.Types.Input.Keyboard.CursorKeys;
+    }
+    if (this.input.keyboard) {
+      this.keys = this.input.keyboard.addKeys("W,A,S,D", false) as Record<string, Phaser.Input.Keyboard.Key>;
+    this.input.keyboard.removeCapture([
+      Phaser.Input.Keyboard.KeyCodes.W, Phaser.Input.Keyboard.KeyCodes.A,
+      Phaser.Input.Keyboard.KeyCodes.S, Phaser.Input.Keyboard.KeyCodes.D,
+      Phaser.Input.Keyboard.KeyCodes.UP, Phaser.Input.Keyboard.KeyCodes.DOWN,
+      Phaser.Input.Keyboard.KeyCodes.LEFT, Phaser.Input.Keyboard.KeyCodes.RIGHT,
+      Phaser.Input.Keyboard.KeyCodes.SPACE
+    ]);
+    }
+
+    this.setupTouchControls();
+    void this.setupLogin();
+    this.setupCollisionMap();
+
+    this.mapTitle = this.add.text(18, 18, "夕凪町　18:42　β 0.49", {
+      fontFamily: "serif", fontSize: "18px", color: "#fff4df",
+      backgroundColor: "#2b243088", padding: { x:10, y:7 }
+    }).setScrollFactor(0).setDepth(1000);
+
+    const hint = this.add.text(18, 58, "WASD / 矢印　・　スマホは左側をドラッグ", {
+      fontFamily: "sans-serif", fontSize: "13px", color: "#f8e8d0",
+      backgroundColor: "#2b243066", padding: { x:8, y:5 }
+    }).setScrollFactor(0).setDepth(1000);
+  }
+
+  private drawWorld() {
+    const g = this.add.graphics();
+
+    // Ground / evening grass
+    g.fillStyle(0x75856a); g.fillRect(0,0,1800,1200);
+
+    // River
+    g.fillStyle(0x536f83); g.fillRect(0,870,1800,230);
+    for (let x=20; x<1800; x+=95) {
+      g.fillStyle(0x91a6ad, .24); g.fillRect(x, 920 + (x%3)*18, 54, 3);
+    }
+
+    // Roads
+    g.fillStyle(0xb9a88c); g.fillRect(0,455,1800,175);
+    g.fillRect(760,0,190,1200);
+    g.fillStyle(0xd6c3a0,.55);
+    for(let x=0;x<1800;x+=90) g.fillRect(x,540,45,4);
+
+    // Station platform / tracks
+    g.fillStyle(0x4a4646); g.fillRect(0,120,720,92);
+    g.fillStyle(0x292a2c); g.fillRect(0,145,720,8); g.fillRect(0,184,720,8);
+    g.fillStyle(0xd5c57c); g.fillRect(0,215,720,10);
+    this.add.text(55,72,"夕凪駅", {fontFamily:"serif",fontSize:"30px",color:"#eee2c8"});
+
+    // Shopping street buildings
+    const buildings = [
+      [1030,280,220,150,0x9b6659],[1280,300,180,130,0x776c72],[1490,260,240,170,0x8a725d],
+      [1050,660,190,140,0x726c61],[1280,680,230,120,0x8b7868],[1550,650,180,150,0x6f7167]
+    ];
+    buildings.forEach(([x,y,w,h,c])=>{
+      g.fillStyle(c as number); g.fillRect(x as number,y as number,w as number,h as number);
+      g.fillStyle(0x463d42); g.fillRect((x as number)+18,(y as number)+42,48,52);
+      g.fillStyle(0xe6c783,.55); g.fillRect((x as number)+92,(y as number)+42,48,52);
+    });
+
+    // Trees
+    const trees = [[170,330],[330,350],[560,340],[1120,850],[1350,845],[1610,840],[300,760],[520,740]];
+    trees.forEach(([x,y])=>{
+      g.fillStyle(0x4f5849); g.fillRect(x-6,y,12,35);
+      g.fillStyle(0x4e684f); g.fillCircle(x,y-8,29);
+      g.fillStyle(0x64765a); g.fillCircle(x-12,y-17,17);
+    });
+
+    // Bridge
+    g.fillStyle(0x8e8173); g.fillRect(735,850,240,270);
+    g.fillStyle(0x5c5653); g.fillRect(745,850,8,270); g.fillRect(957,850,8,270);
+
+    // Lamps
+    [[990,470],[1260,470],[1510,470],[690,690]].forEach(([x,y])=>{
+      g.fillStyle(0x3e3c3d); g.fillRect(x,y,5,58);
+      g.fillStyle(0xf3c97b,.25); g.fillCircle(x+2,y,28);
+      g.fillStyle(0xffdda0); g.fillCircle(x+2,y,7);
+    });
+
+    // Riverside path
+    g.fillStyle(0xa89b80); g.fillRect(0,815,1800,55);
+    this.add.text(1120,885,"川の音が近い。", {fontFamily:"serif",fontSize:"16px",color:"#d8dfdf",alpha:.65});
+
+    // Evening overlay
+    g.fillStyle(0x563f68,.17); g.fillRect(0,0,1800,1200);
+  }
+
+  private makePlayer(
+    x:number,
+    y:number,
+    color:number,
+    label:string,
+    height=1,
+    race="teddy",
+    direction:Direction="down",
+    status:PresenceStatus="afk"
+  ) {
+    const visual=this.add.container(0,0);
+
+    // Character coordinate is the feet. player-depth.ts Y-sorts these containers.
+    const raceKey=this.getRaceData(race).texturePrefix;
+    const sprite=this.add.image(0,0,`${raceKey}-${direction}-3`).setOrigin(.5,1);
+    const raceInfo=this.getRaceData(race);
+    const targetHeight=84*raceInfo.visualScale;
+    sprite.setScale(targetHeight/sprite.height);
+    visual.add(sprite);
+    visual.setScale(height);
+
+    const name=this.add.text(0,-88*height,this.playerLabel(label,status),{
+      fontFamily:"sans-serif",fontSize:"11px",color:"#f8ead8",
+      backgroundColor:"#29232d88",padding:{x:4,y:2}
+    }).setOrigin(.5);
+
+    const c=this.add.container(x,y,[visual,name]).setDepth(10);
+    c.setData("visual",visual);
+    c.setData("sprite",sprite);
+    c.setData("nameText",name);
+    c.setData("phase",0);
+    c.setData("direction",direction);
+    c.setData("height",height);
+    c.setData("race",race);
+    c.setData("playerName",label);
+    c.setData("status",status);
+    c.setData("remoteDX",0);
+    c.setData("remoteDY",0);
+    c.setData("movingUntil",0);
+    c.setData("idleAnimating",false);
+    c.setData("idleFrame",3);
+    c.setData("idleAnimStart",0);
+    c.setData("nextIdleAnim",performance.now()+Phaser.Math.Between(4500,11000));
+    return c;
+  }
+
+  private updatePlayerIdentity(
+    c:Phaser.GameObjects.Container,
+    name:string,
+    status:PresenceStatus,
+    direction?:Direction
+  ) {
+    c.setData("playerName",name);
+    c.setData("status",status);
+    if(direction) c.setData("direction",direction);
+    const nameText=c.getData("nameText") as Phaser.GameObjects.Text | undefined;
+    nameText?.setText(this.playerLabel(name,status));
+  }
+
+  private animateWalker(c:Phaser.GameObjects.Container,moving:boolean,dx=0,dy=0) {
+    const sprite=c.getData("sprite") as Phaser.GameObjects.Image | undefined;
+    if(!sprite)return;
+
+    let dir=String(c.getData("direction")||"down");
+    if(Math.abs(dx)>Math.abs(dy) && dx!==0) dir=dx<0 ? "left" : "right";
+    else if(dy!==0) dir=dy<0 ? "up" : "down";
+    c.setData("direction",dir);
+
+    const race=String(c.getData("race")||"teddy");
+    const raceKey=this.getRaceData(race).texturePrefix;
+    let col=3;
+
+    if(moving){
+      // 移動中は歩行3コマを継続。
+      c.setData("idleAnimating",false);
+      const phase=Number(c.getData("phase")||0)+.16;
+      c.setData("phase",phase);
+      col=[0,1,2][Math.floor(phase)%3];
+      // 停止直後にすぐ立ちアニメが始まらないよう次回時刻を取り直す。
+      c.setData("nextIdleAnim",performance.now()+Phaser.Math.Between(4500,11000));
+    }else{
+      const now=performance.now();
+      let idleAnimating=Boolean(c.getData("idleAnimating"));
+      const nextIdle=Number(c.getData("nextIdleAnim")||0);
+
+      if(!idleAnimating && now>=nextIdle){
+        idleAnimating=true;
+        c.setData("idleAnimating",true);
+        c.setData("idleAnimStart",now);
+      }
+
+      if(idleAnimating){
+        const elapsed=now-Number(c.getData("idleAnimStart")||now);
+        // 約1.2秒だけ 3→4→5→6 と一度アニメーション。
+        const step=Math.floor(elapsed/300);
+        if(step>=4){
+          c.setData("idleAnimating",false);
+          c.setData("nextIdleAnim",now+Phaser.Math.Between(4500,11000));
+          col=3;
+        }else{
+          col=[3,4,5,6][step];
+        }
+      }else{
+        // 通常の立ち状態は完全静止。
+        col=3;
+      }
+    }
+
+    const key=`${raceKey}-${dir}-${col}`;
+    if(sprite.texture.key!==key){
+      sprite.setTexture(key);
+      const raceInfo=this.getRaceData(race);
+      sprite.setScale((84*raceInfo.visualScale)/sprite.height);
+    }
+    sprite.setPosition(0,0);
+  }
+
+
+  private showBubble(c: Phaser.GameObjects.Container, text: string) {
+    const old = c.getData("bubble") as Phaser.GameObjects.Container | undefined;
+    if (old) old.destroy(true);
+
+    const safe = text.trim().slice(0, 80);
+    if (!safe) return;
+
+    const h = Number(c.getData("height") || 1);
+    const label = this.add.text(0, -78*h, safe, {
+      fontFamily: "sans-serif",
+      fontSize: "14px",
+      color: "#242027",
+      backgroundColor: "#fffaf0",
+      padding: { x: 8, y: 5 },
+      wordWrap: { width: 960, useAdvancedWrap: true },
+      align: "center"
+    }).setOrigin(0.5, 1);
