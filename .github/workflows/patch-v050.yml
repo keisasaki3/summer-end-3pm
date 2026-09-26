@@ -1,0 +1,137 @@
+name: Apply beta 0.50 shared profile patch
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/patch-v050.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.event.head_commit.message == 'Stage beta 0.50 profile patch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Apply reviewed changes
+        shell: python
+        run: |
+          from pathlib import Path
+
+          def must_replace(path, old, new):
+              p = Path(path)
+              text = p.read_text()
+              if old not in text:
+                  raise SystemExit(f'pattern not found in {path}: {old[:80]!r}')
+              p.write_text(text.replace(old, new))
+
+          main = Path('client/src/main.ts')
+          text = main.read_text()
+          text = text.replace('private presenceStatus: PresenceStatus = "afk";', 'private presenceStatus: PresenceStatus = "online";')
+          text = text.replace(
+              'return value === "studying" || value === "reading" || value === "busy" ? value : "afk";',
+              'return value === "online" || value === "studying" || value === "reading" || value === "busy" || value === "afk" ? value : "online";'
+          )
+          text = text.replace(
+              'return status === "studying" ? "勉強中" :\n      status === "reading" ? "読書中" :\n      status === "busy" ? "取り込み中" : "AFK";',
+              'return status === "online" ? "" :\n      status === "studying" ? "勉強中" :\n      status === "reading" ? "読書中" :\n      status === "busy" ? "取り込み中" : "AFK";'
+          )
+          text = text.replace(
+              'return `${name}　[${this.statusLabel(status)}]`;',
+              'return status === "online" ? name : `${name}: ${this.statusLabel(status)}`;'
+          )
+          text = text.replace(
+              '[["studying","勉強中"],["reading","読書中"],["busy","取り込み中"],["afk","AFK"]]',
+              '[["online","オンライン"],["studying","勉強中"],["reading","読書中"],["busy","取り込み中"],["afk","AFK"]]'
+          )
+          text = text.replace('this.presenceStatus="afk";', 'this.presenceStatus="online";')
+          text = text.replace('β 0.49', 'β 0.50')
+
+          start = text.index('    if(storedRace){')
+          end = text.index('\n\n    const statusLabel=', start)
+          race_block = '''    Object.assign(raceArea.style,{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:"8px"} as Partial<CSSStyleDeclaration>);
+          const raceButtons:HTMLButtonElement[]=[];
+          for(const race of usableRaces){
+            const button=document.createElement("button");
+            button.type="button";
+            button.textContent=race.name_ja;
+            Object.assign(button.style,{
+              minHeight:"48px",borderRadius:"10px",background:"#211e27",color:"#fff8e8",fontSize:"13px",
+              fontWeight:"700",cursor:"pointer",border:selectedRace===race.race_id ? "2px solid #fff" : "2px solid rgba(255,255,255,.15)"
+            } as Partial<CSSStyleDeclaration>);
+            button.onclick=()=>{
+              selectedRace=race.race_id;
+              raceButtons.forEach((item)=>item.style.border="2px solid rgba(255,255,255,.15)");
+              button.style.border="2px solid #fff";
+            };
+            raceButtons.push(button);
+            raceArea.appendChild(button);
+          }'''
+          text = text[:start] + race_block + text[end:]
+          text = text.replace('raceLabel.textContent=storedRace ? "種族" : "種族を選択";', 'raceLabel.textContent="種族";')
+          main.write_text(text)
+
+          must_replace(
+              'client/src/shared-backend.ts',
+              'export type PresenceStatus = "studying" | "reading" | "busy" | "afk";',
+              'export type PresenceStatus = "online" | "studying" | "reading" | "busy" | "afk";'
+          )
+          must_replace(
+              'client/src/shared-backend.ts',
+              'return status === "studying" || status === "reading" || status === "busy" || status === "afk"\n    ? status\n    : "afk";',
+              'return status === "online" || status === "studying" || status === "reading" || status === "busy" || status === "afk"\n    ? status\n    : "online";'
+          )
+          must_replace(
+              'server/shared-backend.js',
+              'const ALLOWED_STATUS = new Set(["studying", "reading", "busy", "afk"]);',
+              'const ALLOWED_STATUS = new Set(["online", "studying", "reading", "busy", "afk"]);'
+          )
+          must_replace(
+              'server/shared-backend.js',
+              'return ALLOWED_STATUS.has(value) ? value : "afk";',
+              'return ALLOWED_STATUS.has(value) ? value : "online";'
+          )
+          must_replace(
+              'server/shared-backend.js',
+              'async function touchPresence(userId, fallbackStatus = "afk")',
+              'async function touchPresence(userId, fallbackStatus = "online")'
+          )
+          must_replace('package.json', '"version": "0.49.0-beta.1"', '"version": "0.50.0-beta.1"')
+
+          for doc in ['SPEC.md', 'docs/SHARED_BACKEND.md', 'docs/IMPLEMENTATION_HANDOFF.md']:
+              p=Path(doc)
+              if not p.exists():
+                  continue
+              d=p.read_text().replace('β 0.49','β 0.50')
+              d=d.replace('- `studying` — 勉強中\n- `reading` — 読書中\n- `busy` — 取り込み中\n- `afk` — AFK',
+                          '- `online` — オンライン（頭上は名前のみ）\n- `studying` — 勉強中\n- `reading` — 読書中\n- `busy` — 取り込み中\n- `afk` — AFK')
+              p.write_text(d)
+      - name: Install dependencies
+        run: npm install
+      - name: Build and validate
+        run: npm run build
+      - name: Server syntax checks
+        run: |
+          node --check server/server.js
+          node --check server/shared-backend.js
+      - name: Verify requested behavior statically
+        run: |
+          grep -F '"online" | "studying" | "reading" | "busy" | "afk"' client/src/shared-backend.ts
+          grep -F 'return status === "online" ? name : `${name}: ${this.statusLabel(status)}`;' client/src/main.ts
+          grep -F '["online","オンライン"]' client/src/main.ts
+          grep -F 'const ALLOWED_STATUS = new Set(["online", "studying", "reading", "busy", "afk"]);' server/shared-backend.js
+          ! grep -R 'sb_secret_' client dist || exit 1
+      - name: Commit beta 0.50
+        run: |
+          git config user.name 'keisasaki3'
+          git config user.email '61055342+keisasaki3@users.noreply.github.com'
+          git add client/src/main.ts client/src/shared-backend.ts server/shared-backend.js package.json package-lock.json SPEC.md docs/SHARED_BACKEND.md docs/IMPLEMENTATION_HANDOFF.md
+          git commit -m 'Implement shared profile controls beta 0.50'
+          git push origin HEAD:main
