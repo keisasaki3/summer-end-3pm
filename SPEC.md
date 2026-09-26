@@ -157,7 +157,7 @@ Shared World Core用環境変数がサーバー・クライアント双方で未
 
 ## 11. 音声
 
-各マップで環境音をループ再生する。タブやウィンドウが非アクティブになっても可能な限り継続再生するため、マップ環境音は HTML5 Audio を使用し、`pauseOnBlur = false` とする。
+各マップで環境音をループ再生する。
 
 現行音源:
 
@@ -165,9 +165,11 @@ Shared World Core用環境変数がサーバー・クライアント双方で未
 - 木漏れ日神社: `komorebi-cicadas-birds`
 - コンビニ: `convenience-night-ambience`
 
-MP3のエンコーダ遅延・末尾/先頭の静音区間によるループ切れを避けるため、マップ環境音は同一音源の2トラックを交互に使う。HTML5 Audio では同一キーを同時再生するために複数の `HTMLAudioElement` が必要なので、各マップ音源はロード時に `instances: 2` を確保する。
+夕凪町とコンビニは、タブやウィンドウが非アクティブになっても可能な限り継続再生するため、HTML5 Audio を使用し `pauseOnBlur = false` とする。MP3境界対策として同一音源の2トラックを使い、ロード時に `instances: 2` を確保する。終端5秒前から次トラックの再生を試み、`play()` 成功後に4秒間の equal-power（sin/cos）クロスフェードを行う。
 
-現行実装では終端5秒前から次トラックの再生を試みる。次トラックの `play()` が成功したことを確認してから4秒間のクロスフェードを開始し、再生開始に失敗した場合は旧トラックを減衰させず100ms間隔の監視で再試行する。クロスフェードは線形50/50ではなく equal-power（sin/cos）カーブを使用し、中間点の体感音量低下を抑える。通常の `loop:true` だけには依存しない。
+木漏れ日神社はループ切れ検証のため、上記HTML5 Audioクロスフェード経路を実再生では使用しない。`client/src/shrine-web-audio-loop.ts` が同一オリジンのMP3を `fetch` し、`decodeAudioData()` でPCMの `AudioBuffer` に展開する。1個の `AudioBufferSourceNode` を `loop = true` にして継続再生し、JSタイマー監視・毎周の `play()`・2トラック切替を行わない。MP3エンコーダ境界の影響を避けるため、現行実証値として先頭と末尾を各50ms除外し、`loopStart = 0.05`、`loopEnd = buffer.duration - 0.05` とする。
+
+神社のWeb Audioはブラウザによりバックグラウンド時にsuspendされる可能性がある。現段階では「ゲームを見ている間の途切れないループ」を優先して実証する。
 
 ユーザーのOPTIONS音量は共通マスター音量とする。音源そのものの体感差は `client/src/map-audio-levels.ts` のマップ別補正倍率で吸収する。
 
