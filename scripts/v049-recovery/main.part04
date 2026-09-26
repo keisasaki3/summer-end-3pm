@@ -1,0 +1,429 @@
+        this.renderMoney();
+        return;
+      }
+
+      if(msg.type==="leave"){
+        const p=this.others.get(msg.id);
+        if(p){ p.destroy(true); this.others.delete(msg.id); }
+        return;
+      }
+
+      if(msg.type==="logout_ack"){
+        socket.close(1000,"logout");
+      }
+    });
+
+    socket.addEventListener("close",()=>{
+      if(this.socket!==socket) return;
+      this.stopHeartbeat();
+      this.socket=undefined;
+      this.clearOtherPlayers();
+      this.scheduleReconnect();
+    });
+
+    socket.addEventListener("error",()=>{
+      if(this.socket===socket && socket.readyState!==WebSocket.CLOSED) socket.close();
+    });
+  }
+
+  private stopMapAudio() {
+    if(this.activeMapBgm){
+      this.activeMapBgm.stop();
+      this.activeMapBgm.destroy();
+      this.activeMapBgm=undefined;
+    }
+    for(const sound of this.activeMapAmbience){
+      sound.stop();
+      sound.destroy();
+    }
+    this.activeMapAmbience=[];
+  }
+
+  private applyMapAudio() {
+    this.stopMapAudio();
+    const config=this.mapData[this.currentMap].audio;
+
+    if(config.bgmKey && this.cache.audio.exists(config.bgmKey)){
+      this.activeMapBgm=this.sound.add(config.bgmKey,{loop:true,volume:1});
+      this.activeMapBgm.play();
+    }
+
+    for(const key of config.ambienceKeys){
+      if(!this.cache.audio.exists(key)) continue;
+      const sound=this.sound.add(key,{loop:true,volume:1});
+      sound.play();
+      this.activeMapAmbience.push(sound);
+    }
+  }
+
+  private setupMoneyHud() {
+    const hud=document.createElement("div");
+    Object.assign(hud.style,{position:"fixed",left:"14px",top:"14px",zIndex:"30",
+      padding:"9px 14px",border:"1px solid #ffffff55",borderRadius:"8px",
+      background:"#161616cc",color:"#fff",font:"700 16px system-ui",pointerEvents:"none"});
+    document.body.appendChild(hud);
+    this.moneyHud=hud;
+    this.renderMoney();
+  }
+
+  private renderMoney() {
+    if(this.moneyHud) this.moneyHud.textContent=`所持金　${this.money} 夏円`;
+  }
+
+  private setupTownQuiz() {
+    const panel=document.createElement("div");
+    Object.assign(panel.style,{display:"none",position:"fixed",left:"50%",top:"50%",
+      transform:"translate(-50%,-50%)",zIndex:"45",width:"min(560px,88vw)",boxSizing:"border-box",
+      background:"#151515f2",color:"#fff",border:"1px solid #ffffff55",borderRadius:"12px",
+      padding:"22px",fontFamily:"system-ui",boxShadow:"0 18px 55px #0008"});
+    document.body.appendChild(panel);
+    this.quizPanel=panel;
+  }
+
+  private showTownQuiz(msg:any) {
+    if(!this.quizPanel) return;
+    this.activeQuizId=String(msg.id);
+    const panel=this.quizPanel;
+    panel.innerHTML="";
+    panel.style.display="block";
+    const announce=document.createElement("div");
+    announce.textContent="📢 夕凪町 町内アナウンス";
+    Object.assign(announce.style,{fontSize:"14px",opacity:".72",marginBottom:"7px"});
+    const title=document.createElement("div");
+    title.textContent="教養クイズ　正解で100夏円";
+    Object.assign(title.style,{fontSize:"20px",fontWeight:"800",marginBottom:"14px"});
+    const q=document.createElement("div");
+    q.textContent=String(msg.question);
+    Object.assign(q.style,{fontSize:"17px",lineHeight:"1.6",marginBottom:"14px"});
+    panel.append(announce,title,q);
+    (msg.options||[]).forEach((text:string,i:number)=>{
+      const b=document.createElement("button");
+      b.textContent=`${["A","B","C","D"][i]}. ${text}`;
+      Object.assign(b.style,{display:"block",width:"100%",textAlign:"left",padding:"12px",
+        margin:"8px 0",borderRadius:"7px",border:"1px solid #ffffff44",background:"#292929",
+        color:"#fff",cursor:"pointer",fontSize:"15px"});
+      b.addEventListener("click",()=>{
+        panel.querySelectorAll("button").forEach(x=>(x as HTMLButtonElement).disabled=true);
+        this.socket?.send(JSON.stringify({type:"quiz_answer",id:this.activeQuizId,answer:i}));
+      });
+      panel.appendChild(b);
+    });
+    const foot=document.createElement("div");
+    foot.textContent="町にいるみんなが同じ問題に挑戦中。受付は20秒間。";
+    Object.assign(foot.style,{fontSize:"12px",opacity:".58",marginTop:"12px"});
+    panel.appendChild(foot);
+  }
+
+  private showQuizResult(msg:any) {
+    if(!this.quizPanel || this.activeQuizId!==String(msg.id)) return;
+    this.money=Number(msg.money)||this.money;
+    this.renderMoney();
+    const panel=this.quizPanel;
+    const result=document.createElement("div");
+    result.textContent=msg.correct ? `正解！ +100夏円　（${this.money}夏円）` : `不正解。正解は「${msg.correctText}」`;
+    Object.assign(result.style,{marginTop:"14px",padding:"12px",borderRadius:"7px",
+      background:msg.correct?"#24452f":"#4a2929",fontWeight:"700"});
+    panel.appendChild(result);
+    setTimeout(()=>this.closeTownQuiz(),3500);
+  }
+
+  private closeTownQuiz(message?:string) {
+    if(!this.quizPanel) return;
+    if(message){
+      const note=document.createElement("div"); note.textContent=message;
+      Object.assign(note.style,{marginTop:"12px",opacity:".7"}); this.quizPanel.appendChild(note);
+      setTimeout(()=>{if(this.quizPanel)this.quizPanel.style.display="none";},1200);
+    } else this.quizPanel.style.display="none";
+    this.activeQuizId=null;
+  }
+
+  private setupOptions() {
+    const coordHud=document.createElement("div");
+    Object.assign(coordHud.style,{position:"fixed",right:"14px",top:"64px",zIndex:"29",
+      padding:"5px 8px",borderRadius:"6px",background:"rgba(10,12,16,.58)",
+      color:"rgba(255,255,255,.9)",font:"12px/1.2 monospace",pointerEvents:"none"});
+    document.body.appendChild(coordHud);
+    this.coordHud=coordHud;
+    coordHud.style.display=this.coordsVisible ? "block" : "none";
+
+    const button=document.createElement("button");
+    button.textContent="⚙";
+    button.title="Options";
+    Object.assign(button.style,{position:"fixed",right:"14px",top:"14px",zIndex:"30",
+      width:"42px",height:"42px",fontSize:"21px",border:"1px solid #ffffff66",
+      borderRadius:"8px",background:"#161616cc",color:"#fff",cursor:"pointer"});
+    document.body.appendChild(button);
+
+    const panel=document.createElement("div");
+    Object.assign(panel.style,{display:"none",position:"fixed",inset:"0",zIndex:"40",
+      background:"#0008",alignItems:"center",justifyContent:"center"});
+    const box=document.createElement("div");
+    Object.assign(box.style,{
+      width:"min(360px,86vw)",background:"#181818",color:"white",padding:"24px",
+      border:"1px solid #ffffff33",borderRadius:"10px",fontFamily:"system-ui"
+    } as Partial<CSSStyleDeclaration>);
+    const heading=document.createElement("div");
+    heading.textContent="OPTIONS";
+    Object.assign(heading.style,{fontSize:"20px",fontWeight:"700",marginBottom:"22px"});
+
+    const coordsLabel=document.createElement("label");
+    Object.assign(coordsLabel.style,{display:"flex",alignItems:"center",gap:"9px",cursor:"pointer"});
+    const coords=document.createElement("input");
+    coords.type="checkbox";
+    const coordsText=document.createTextNode("座標を表示");
+    coordsLabel.append(coords,coordsText);
+    box.append(heading,coordsLabel);
+
+    let statusSelect:HTMLSelectElement|undefined;
+    if(sharedBackendEnabled && this.authUserId){
+      const statusLabel=document.createElement("label");
+      statusLabel.textContent="ステータス";
+      statusLabel.style.display="block";
+      statusLabel.style.marginTop="18px";
+      statusLabel.style.marginBottom="6px";
+      statusSelect=document.createElement("select");
+      for(const [value,label] of [["studying","勉強中"],["reading","読書中"],["busy","取り込み中"],["afk","AFK"]] as const){
+        const option=document.createElement("option");
+        option.value=value;option.textContent=label;statusSelect.appendChild(option);
+      }
+      Object.assign(statusSelect.style,{
+        width:"100%",height:"40px",boxSizing:"border-box",borderRadius:"8px",
+        background:"#242424",color:"#fff",border:"1px solid #ffffff33",padding:"0 8px"
+      } as Partial<CSSStyleDeclaration>);
+      statusSelect.value=this.presenceStatus;
+      statusSelect.addEventListener("change",()=>{
+        const next=this.normalizeStatus(statusSelect?.value);
+        if(this.socket?.readyState!==WebSocket.OPEN){
+          statusSelect!.value=this.presenceStatus;
+          return;
+        }
+        this.socket.send(JSON.stringify({type:"status",status:next}));
+      });
+      box.append(statusLabel,statusSelect);
+    }
+
+    const actions=document.createElement("div");
+    Object.assign(actions.style,{display:"flex",gap:"10px",marginTop:"20px"});
+    const closeButton=document.createElement("button");
+    closeButton.textContent="CLOSE";
+    Object.assign(closeButton.style,{flex:"1",padding:"10px"});
+    actions.appendChild(closeButton);
+
+    if(sharedBackendEnabled && this.authUserId){
+      const logout=document.createElement("button");
+      logout.textContent="LOGOUT";
+      Object.assign(logout.style,{flex:"1",padding:"10px"});
+      logout.addEventListener("click",()=>void(async()=>{
+        logout.disabled=true;
+        this.loginOpen=true;
+        try{
+          const socket=this.socket;
+          if(socket?.readyState===WebSocket.OPEN){
+            await new Promise<void>((resolve)=>{
+              let settled=false;
+              const finish=()=>{if(settled)return;settled=true;resolve();};
+              const timer=window.setTimeout(finish,1500);
+              const onMessage=(event:MessageEvent)=>{
+                try{
+                  const msg=JSON.parse(String(event.data));
+                  if(msg.type!=="logout_ack")return;
+                  window.clearTimeout(timer);
+                  socket.removeEventListener("message",onMessage);
+                  finish();
+                }catch{}
+              };
+              socket.addEventListener("message",onMessage);
+              socket.send(JSON.stringify({type:"logout"}));
+            });
+          }
+          await signOutShared();
+        }finally{
+          window.location.reload();
+        }
+      })());
+      actions.appendChild(logout);
+    }
+
+    box.appendChild(actions);
+    panel.appendChild(box);
+    document.body.appendChild(panel);
+
+    const sync=()=>{
+      coords.checked=this.coordsVisible;
+      if(statusSelect)statusSelect.value=this.presenceStatus;
+    };
+    coords.addEventListener("change",()=>{
+      this.coordsVisible=coords.checked;
+      localStorage.setItem("summer-end-3pm-show-coords",this.coordsVisible ? "1" : "0");
+      if(this.coordHud)this.coordHud.style.display=this.coordsVisible ? "block" : "none";
+    });
+    const close=()=>panel.style.display="none";
+    closeButton.addEventListener("click",close);
+    button.addEventListener("click",()=>{sync();panel.style.display="flex";});
+    panel.addEventListener("click",(event)=>{if(event.target===panel)close();});
+  }
+
+  private updateMapTitle() {
+    this.mapTitle?.setText(
+      this.currentMap==="yunagicho" ? "夕凪町　18:42　β 0.49" :
+      this.currentMap==="komorebi" ? "木漏れ日神社　β 0.49" :
+      "コンビニ　β 0.49"
+    );
+  }
+
+  private setupImageField() {
+    this.background=this.add.image(0,0,"yunagicho-field").setOrigin(0).setDepth(-100);
+    this.background.setDisplaySize(1536,864);
+    this.cameras.main.setBounds(0,0,1536,864);
+  }
+
+  private switchMap(map:MapId, x:number, y:number) {
+    if(this.transitionLock || !this.me) return;
+    this.transitionLock=true;
+    this.currentMap=map;
+    const data=this.mapData[map];
+    this.background?.setTexture(data.texture);
+    this.background?.setDisplaySize(1536,864);
+    this.setupCollisionMap();
+    this.applyMapAudio();
+    for(const other of this.others.values()) other.destroy(true);
+    this.others.clear();
+    this.me.setPosition(x,y);
+    this.updateMapTitle();
+    if(map!=="yunagicho" && this.quizPanel?.style.display!=="none") this.closeTownQuiz("");
+    if(this.socket?.readyState===WebSocket.OPEN){
+      this.socket.send(JSON.stringify({
+        type:"move",
+        x:Math.round(x),
+        y:Math.round(y),
+        map,
+        direction:this.normalizeDirection(this.me.getData("direction"))
+      }));
+    }
+    this.time.delayedCall(700,()=>this.transitionLock=false);
+  }
+
+  private checkMapTransition() {
+    if(!this.me || this.transitionLock) return;
+    if(this.currentMap==="yunagicho"){
+      if(this.me.x>=70 && this.me.x<=300 && this.me.y<=105){
+        this.switchMap("komorebi",820,805); return;
+      }
+      // 夕凪町・真ん中下の道路 → コンビニ
+      if(this.me.x>=1012 && this.me.x<=1140 && this.me.y>=835){
+        this.switchMap("convenience",1440,790);
+      }
+    }else if(this.currentMap==="komorebi"){
+      if(this.me.x>=720 && this.me.x<=930 && this.me.y>=835){
+        this.switchMap("yunagicho",170,125);
+      }
+    }else{
+      // コンビニ駐車場・中央下 → 夕凪町
+      if(this.me.x>=1376 && this.me.x<=1504 && this.me.y>=835){
+        this.switchMap("yunagicho",1076,800);
+      }
+    }
+  }
+
+  private setupTouchControls(){
+    this.input.on("pointerdown",(p:Phaser.Input.Pointer)=>{
+      if(p.x>this.scale.width*.65)return;
+      Object.assign(this.joystick,{active:true,pointerId:p.id,originX:p.x,originY:p.y,dx:0,dy:0});
+    });
+    this.input.on("pointermove",(p:Phaser.Input.Pointer)=>{
+      if(!this.joystick.active||p.id!==this.joystick.pointerId)return;
+      const dx=p.x-this.joystick.originX,dy=p.y-this.joystick.originY,len=Math.hypot(dx,dy)||1,max=58,s=Math.min(1,max/len);
+      this.joystick.dx=dx*s/max;this.joystick.dy=dy*s/max;
+    });
+    const release=(p:Phaser.Input.Pointer)=>{
+      if(p.id!==this.joystick.pointerId)return;
+      this.joystick.active=false;this.joystick.dx=0;this.joystick.dy=0;
+    };
+    this.input.on("pointerup",release);this.input.on("pointerupoutside",release);
+  }
+
+
+  private isDomEditing() {
+    const el=document.activeElement as HTMLElement | null;
+    return !!el && (el.tagName==="INPUT" || el.tagName==="TEXTAREA" || el.isContentEditable);
+  }
+
+  update(time:number,delta:number){
+    if(this.me && this.coordHud && this.coordsVisible){
+      this.coordHud.textContent=`${this.mapData[this.currentMap].name}  X:${Math.round(this.me.x)}  Y:${Math.round(this.me.y)}`;
+    }
+    if (this.loginOpen || this.isDomEditing()) return;
+    if(!this.me)return;
+    this.checkMapTransition();
+
+    // 他プレイヤーも描画フレームごとに歩行/立ちアニメーションする。
+    const now=performance.now();
+    for(const other of this.others.values()){
+      const moving=now < Number(other.getData("movingUntil")||0);
+      this.animateWalker(
+        other,
+        moving,
+        Number(other.getData("remoteDX")||0),
+        Number(other.getData("remoteDY")||0)
+      );
+    }
+
+    const typing =
+      this.loginOpen ||
+      (this.chatInput !== undefined && document.activeElement === this.chatInput);
+
+    let dx=0,dy=0;
+
+    if(!typing){
+      if(this.cursors?.left.isDown||this.keys?.A?.isDown)dx--;
+      if(this.cursors?.right.isDown||this.keys?.D?.isDown)dx++;
+      if(this.cursors?.up.isDown||this.keys?.W?.isDown)dy--;
+      if(this.cursors?.down.isDown||this.keys?.S?.isDown)dy++;
+      dx+=this.joystick.dx;
+      dy+=this.joystick.dy;
+    }
+
+    const len=Math.hypot(dx,dy),moving=len>0;
+
+    if(moving){
+      dx/=len;dy/=len;
+      const beforeX=this.me.x, beforeY=this.me.y;
+      this.tryMovePlayer(dx,dy,delta);
+
+      const actuallyMoved =
+        Math.abs(this.me.x-beforeX)>.01 ||
+        Math.abs(this.me.y-beforeY)>.01;
+
+      this.animateWalker(this.me,actuallyMoved,dx,dy);
+
+      if(actuallyMoved && time-this.lastSent>50 && this.socket?.readyState===WebSocket.OPEN){
+        this.socket.send(JSON.stringify({
+          type:"move",
+          x:Math.round(this.me.x),
+          y:Math.round(this.me.y),
+          map:this.currentMap,
+          direction:this.normalizeDirection(this.me.getData("direction"))
+        }));
+        this.lastSent=time;
+      }
+    } else {
+      this.animateWalker(this.me,false);
+    }
+  }
+}
+
+new Phaser.Game({
+  type:Phaser.AUTO,
+  parent:"app",
+  width:1280,
+  height:720,
+  backgroundColor:"#0d0d0d",
+  scene:WalkScene,
+  scale:{
+    mode:Phaser.Scale.NONE,
+    autoCenter:Phaser.Scale.NO_CENTER,
+    width:1280,
+    height:720
+  },
+  render:{pixelArt:true,antialias:false}
+});
