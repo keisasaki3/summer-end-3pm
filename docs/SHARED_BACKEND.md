@@ -153,7 +153,7 @@ Server:
 
 ## Production activation
 
-コード側はβ0.49で統合済み。Render等へは次の環境変数を安全なsecret/environment設定として登録する必要がある。
+コード側はβ0.49で統合済み。本番はRender（https://summer-end-3pm.onrender.com）。Renderへは次の環境変数を安全なsecret/environment設定として登録する必要がある。
 
 - `VITE_SUPABASE_URL`
 - `VITE_SUPABASE_PUBLISHABLE_KEY`
