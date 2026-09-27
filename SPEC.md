@@ -243,8 +243,8 @@ Shared World Core用環境変数がサーバー・クライアント双方で未
 1. `SPEC.md` を読む
 2. `TODO` を読む
 3. ユーザー依頼と同時に処理可能なTODOを原則まとめて実装する
-4. 完了したTODOを削除し、仕様書を現行実装に合わせて更新する
-5. 独立した2回の検証を行う
+4. 完了したTODOを削除し、`SPEC.md` を現行実装に合わせて更新する（README更新履歴・HANDOFFの版番号などは更新不要。2026-09-27 Keita指示）
+5. 検証を1回行う（2026-09-27 Keita指示で2回→1回）
 
 Shared World Core統合を変更する場合は少なくとも次を確認する。
 
@@ -260,7 +260,7 @@ Shared World Core統合を変更する場合は少なくとも次を確認する
 - 2人同時接続、heartbeat snapshot、reconnect、chat、3マップ、Y-sortを維持
 - マップ音量は `master volume × map gain` で適用される
 
-成果物/commit前に独立した2回の検証を行う。
+成果物/commit前に検証を1回行う。
 
 ## 14. TODO
 
