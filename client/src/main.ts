@@ -189,8 +189,10 @@ class WalkScene extends Phaser.Scene {
         this.load.image(`rabbit-jk-${dir}-${i}`,`/sprites/runtime/rabbit-jk/${dir}-${i}.png`);
       }
     });
+    // マップ環境音はクロスフェードループ用に同じ音源のaudio要素を2つ確保する。
     for(const [key,url] of Object.entries(this.audioAssets)) {
-      this.load.audio(key,url);
+      // 木漏れ日神社は shrine-web-audio-loop.ts がWeb Audioで再生するため1つでよい。
+      this.load.audio(key,url,{instances:key==="komorebi-cicadas-birds" ? 1 : 2});
     }
   }
 
@@ -224,7 +226,7 @@ class WalkScene extends Phaser.Scene {
     void this.setupLogin();
     this.setupCollisionMap();
 
-    this.mapTitle = this.add.text(18, 18, "夕凪町　18:42　β 0.55", {
+    this.mapTitle = this.add.text(18, 18, "夕凪町　18:42　β 0.56", {
       fontFamily: "serif", fontSize: "18px", color: "#fff4df",
       backgroundColor: "#2b243088", padding: { x:10, y:7 }
     }).setScrollFactor(0).setDepth(1000);
@@ -543,8 +545,13 @@ class WalkScene extends Phaser.Scene {
 
     const google=document.createElement("button");
     google.type="button";
-    google.textContent="Googleでログイン";
+    // 人生クエストのGoogleボタンと同じ公式Gアイコン。
+    google.innerHTML='<svg width="18" height="18" viewBox="0 0 48 48" aria-hidden="true" style="flex:none"><path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/><path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/><path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/><path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/></svg>';
+    const googleLabel=document.createElement("span");
+    googleLabel.textContent="Googleでログイン";
+    google.appendChild(googleLabel);
     Object.assign(google.style,{
+      display:"flex",alignItems:"center",justifyContent:"center",gap:"10px",
       width:"100%",height:"44px",borderRadius:"10px",border:"1px solid rgba(255,255,255,.25)",
       background:"#211e27",color:"#fff8e8",fontWeight:"700",cursor:"pointer"
     } as Partial<CSSStyleDeclaration>);
@@ -988,7 +995,7 @@ for(const race of usableRaces){
       if(y>848 && !(x>=720&&x<=930)) return true;
     }else{
       if(y<16)return true;
-      if(y>848 && !(x>=1376&&x<=1504)) return true;
+      if(y>848) return true;
     }
     const hit=new Phaser.Geom.Circle(x,y,r);
     for(const rect of this.rectBlockers)if(Phaser.Geom.Intersects.CircleToRectangle(hit,rect))return true;
@@ -1538,9 +1545,9 @@ for(const race of usableRaces){
 
   private updateMapTitle() {
     this.mapTitle?.setText(
-      this.currentMap==="yunagicho" ? "夕凪町　18:42　β 0.55" :
-      this.currentMap==="komorebi" ? "木漏れ日神社　β 0.55" :
-      "コンビニ　β 0.55"
+      this.currentMap==="yunagicho" ? "夕凪町　18:42　β 0.56" :
+      this.currentMap==="komorebi" ? "木漏れ日神社　β 0.56" :
+      "コンビニ　β 0.56"
     );
   }
 
@@ -1583,15 +1590,15 @@ for(const race of usableRaces){
       }
       // 夕凪町・真ん中下の道路 → コンビニ
       if(this.me.x>=1012 && this.me.x<=1140 && this.me.y>=835){
-        this.switchMap("convenience",1440,790);
+        this.switchMap("convenience",1440,760);
       }
     }else if(this.currentMap==="komorebi"){
       if(this.me.x>=720 && this.me.x<=930 && this.me.y>=835){
         this.switchMap("yunagicho",170,125);
       }
     }else{
-      // コンビニ駐車場・中央下 → 夕凪町
-      if(this.me.x>=1376 && this.me.x<=1504 && this.me.y>=835){
+      // コンビニ右端の道路（上下中央） → 夕凪町
+      if(this.me.x>=1500 && this.me.y>=710 && this.me.y<=810){
         this.switchMap("yunagicho",1076,800);
       }
     }
