@@ -15,46 +15,10 @@ const CROSSFADE_MS = 4000;
 const LOOP_MONITOR_MS = 100;
 const HALF_PI = Math.PI / 2;
 
-// Phaser's HTML5 Audio loader creates one HTMLAudioElement per key by default.
-// A real crossfade needs two physical elements playing the same key at once,
-// otherwise starting the standby sound steals the only available element and
-// interrupts the active sound. Force two instances for map ambience at load time.
-const loaderProto = phaserRuntime.Loader?.LoaderPlugin?.prototype as any;
-if (loaderProto && !loaderProto.__summerEndMapAudioInstancesPatched) {
-  const originalAudio = loaderProto.audio;
-
-  loaderProto.audio = function loadMapAudioWithOverlapInstances(
-    key: unknown,
-    urls?: unknown,
-    config?: Record<string, unknown>,
-    xhrSettings?: unknown
-  ) {
-    const audioKey =
-      typeof key === "string"
-        ? key
-        : String((key as { key?: unknown } | null)?.key ?? "");
-
-    if (!isMapAudioKey(audioKey)) {
-      return originalAudio.call(this, key, urls, config, xhrSettings);
-    }
-
-    const requestedInstances = Number(config?.instances ?? 0);
-    const instances =
-      Number.isFinite(requestedInstances) && requestedInstances >= 2
-        ? Math.floor(requestedInstances)
-        : 2;
-
-    return originalAudio.call(
-      this,
-      key,
-      urls,
-      { ...(config ?? {}), instances },
-      xhrSettings
-    );
-  };
-
-  loaderProto.__summerEndMapAudioInstancesPatched = true;
-}
+// A real crossfade needs two physical HTMLAudioElements for the same key.
+// main.ts loads map ambience with { instances: 2 }. (Patching
+// LoaderPlugin.prototype.audio has no effect because Phaser installs file type
+// loaders as instance properties.)
 
 const html5ManagerProto = phaserRuntime.Sound?.HTML5AudioSoundManager?.prototype as any;
 if (html5ManagerProto && !html5ManagerProto.__summerEndSeamlessLoopPatched) {
@@ -149,6 +113,7 @@ if (html5ManagerProto && !html5ManagerProto.__summerEndSeamlessLoopPatched) {
       // every 100ms while the current track keeps playing at full level.
       const started = next.play?.() === true;
       if (!started) return false;
+      watchEnded(nextIndex);
 
       crossfading = true;
       fadeStartedAt = performance.now();
@@ -180,6 +145,7 @@ if (html5ManagerProto && !html5ManagerProto.__summerEndSeamlessLoopPatched) {
         setChildVolume(nextIndex, 0);
         return;
       }
+      watchEnded(nextIndex);
       activeIndex = nextIndex;
       nextIndex = 1 - activeIndex;
     };
@@ -187,6 +153,24 @@ if (html5ManagerProto && !html5ManagerProto.__summerEndSeamlessLoopPatched) {
     sounds.forEach((sound, index) => {
       sound?.on?.("complete", () => recoverFromUnexpectedEnd(index));
     });
+
+    // Phaser's "complete" depends on a finite duration and on the game loop
+    // (which stops in background tabs). Also watch the element's native "ended".
+    const watchEnded = (index: number) => {
+      const tag = sounds[index]?.audio as HTMLAudioElement | undefined;
+      if (!tag) return;
+      const onEnded = () => {
+        if (sounds[index]?.audio === tag) recoverFromUnexpectedEnd(index);
+      };
+      tag.addEventListener("ended", onEnded, { once: true });
+    };
+
+    const childDuration = (sound: any) => {
+      const phaserDuration = Number(sound?.duration);
+      if (Number.isFinite(phaserDuration) && phaserDuration > 0) return phaserDuration;
+      const elementDuration = Number(sound?.audio?.duration);
+      return Number.isFinite(elementDuration) ? elementDuration : NaN;
+    };
 
     const monitor = () => {
       if (!running) return;
@@ -199,7 +183,11 @@ if (html5ManagerProto && !html5ManagerProto.__summerEndSeamlessLoopPatched) {
       }
 
       const active = sounds[activeIndex];
-      const duration = Number(active?.duration ?? 0);
+      if (active?.audio?.ended) {
+        recoverFromUnexpectedEnd(activeIndex);
+        return;
+      }
+      const duration = childDuration(active);
       const seek = Number(active?.seek ?? 0);
       if (
         Number.isFinite(duration) &&
@@ -234,6 +222,7 @@ if (html5ManagerProto && !html5ManagerProto.__summerEndSeamlessLoopPatched) {
         setChildVolume(0, targetVolume());
         setChildVolume(1, 0);
         const result = sounds[0]?.play?.();
+        if (result === true) watchEnded(0);
         startMonitor();
         return result;
       },

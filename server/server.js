@@ -178,10 +178,31 @@ function serveStatic(req, res) {
   fs.stat(filePath, (err, stat) => {
     if (!err && stat.isFile()) {
       const ext = path.extname(filePath).toLowerCase();
-      res.writeHead(200, {
+      const headers = {
         "Content-Type": MIME[ext] || "application/octet-stream",
         "Cache-Control": ext === ".html" ? "no-cache" : "public, max-age=3600",
-      });
+        "Accept-Ranges": "bytes",
+      };
+      // Content-Length と Range が無いと、ブラウザはXingヘッダの無いMP3の長さを
+      // 判定できず duration=Infinity になり、BGMのループ処理が働かない。
+      const range = /^bytes=(\d*)-(\d*)$/.exec(String(req.headers.range || ""));
+      if (range && (range[1] || range[2])) {
+        let start = range[1] ? Number(range[1]) : stat.size - Number(range[2]);
+        let end = range[1] && range[2] ? Number(range[2]) : stat.size - 1;
+        start = Math.max(0, start);
+        end = Math.min(end, stat.size - 1);
+        if (start > end || start >= stat.size) {
+          res.writeHead(416, { "Content-Range": `bytes */${stat.size}` });
+          res.end();
+          return;
+        }
+        res.writeHead(206, { ...headers, "Content-Range": `bytes ${start}-${end}/${stat.size}`, "Content-Length": end - start + 1 });
+        if (req.method === "HEAD") { res.end(); return; }
+        fs.createReadStream(filePath, { start, end }).pipe(res);
+        return;
+      }
+      res.writeHead(200, { ...headers, "Content-Length": stat.size });
+      if (req.method === "HEAD") { res.end(); return; }
       fs.createReadStream(filePath).pipe(res);
       return;
     }
@@ -443,7 +464,7 @@ wss.on("close",()=>{
 
 server.listen(PORT, "0.0.0.0", () => {
   console.log("");
-  console.log("午後三時、夏の果て。 β 0.55");
+  console.log("午後三時、夏の果て。 β 0.56");
   console.log(`Server: http://localhost:${PORT}`);
   console.log(`Mode: ${DEV ? "development websocket-only" : "production single-URL"}`);
   console.log(`Shared backend: ${sharedBackend.enabled ? "Supabase" : "legacy compatibility"}`);
