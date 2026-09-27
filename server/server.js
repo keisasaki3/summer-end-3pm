@@ -237,8 +237,9 @@ wss.on("connection", (socket) => {
 
   const player = {
     id: connectionId,
-    x: 820 + Math.floor(Math.random() * 80),
-    y: 520 + Math.floor(Math.random() * 80),
+    // 夕凪町の中央交差点（β0.57の背景に合わせた初期スポーン）
+    x: 600 + Math.floor(Math.random() * 80),
+    y: 500 + Math.floor(Math.random() * 60),
     color: 0x60a5fa,
     name: "WALKER",
     height: 1,
@@ -464,7 +465,7 @@ wss.on("close",()=>{
 
 server.listen(PORT, "0.0.0.0", () => {
   console.log("");
-  console.log("午後三時、夏の果て。 β 0.56");
+  console.log("午後三時、夏の果て。 β 0.57");
   console.log(`Server: http://localhost:${PORT}`);
   console.log(`Mode: ${DEV ? "development websocket-only" : "production single-URL"}`);
   console.log(`Shared backend: ${sharedBackend.enabled ? "Supabase" : "legacy compatibility"}`);
