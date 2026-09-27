@@ -25,7 +25,7 @@ const SERVER_URL = isViteDev
 type MapId = "yunagicho" | "komorebi" | "convenience";
 type Direction = "up" | "down" | "left" | "right";
 type MapAudioConfig = { bgmKey: string | null; ambienceKeys: string[] };
-type MapDefinition = { name: string; texture: string; quiz: boolean; audio: MapAudioConfig };
+type MapDefinition = { name: string; texture: string; audio: MapAudioConfig };
 type PlayerState = {
   id: string;
   x: number;
@@ -56,7 +56,10 @@ class WalkScene extends Phaser.Scene {
   private heartbeatTimer?: number;
   private reconnectAttempts = 0;
   private lastHeartbeatAck = 0;
+  private pendingHeartbeatSince = 0;
   private lastSent = 0;
+  private positionUnsent = false;
+  private replacedByNewerConnection = false;
 
   private joystick = { active:false, pointerId:-1, originX:0, originY:0, dx:0, dy:0 };
   private chatInput?: HTMLInputElement;
@@ -77,10 +80,6 @@ class WalkScene extends Phaser.Scene {
   private accessToken = "";
   private presenceStatus: PresenceStatus = "online";
   private loginOpen = true;
-  private money = 0;
-  private moneyHud?: HTMLDivElement;
-  private quizPanel?: HTMLDivElement;
-  private activeQuizId: string | null = null;
   private rectBlockers: Phaser.Geom.Rectangle[] = [];
   private circleBlockers: Phaser.Geom.Circle[] = [];
   private polygonBlockers: Phaser.Geom.Polygon[] = [];
@@ -88,8 +87,8 @@ class WalkScene extends Phaser.Scene {
   private background?: Phaser.GameObjects.Image;
   private mapTitle?: Phaser.GameObjects.Text;
   private transitionLock = false;
-  private activeMapBgm?: Phaser.Sound.BaseSound;
-  private activeMapAmbience: Phaser.Sound.BaseSound[] = [];
+  private activeMapBgm?: Phaser.Sound.HTML5AudioSound;
+  private activeMapAmbience: Phaser.Sound.HTML5AudioSound[] = [];
   private masterVolume = Math.min(1, Math.max(0, Number(localStorage.getItem("summer-end-3pm-master-volume") ?? "1")));
 
   // 今後、環境音/BGMファイルを追加したらここへ key -> URL を登録する。
@@ -110,15 +109,15 @@ class WalkScene extends Phaser.Scene {
 
   private readonly mapData: Record<MapId,MapDefinition> = {
     yunagicho: {
-      name:"夕凪町", texture:"yunagicho-field", quiz:false,
+      name:"夕凪町", texture:"yunagicho-field",
       audio:{ bgmKey:"yunagicho-perves-village", ambienceKeys:[] }
     },
     komorebi: {
-      name:"木漏れ日神社", texture:"komorebi-field", quiz:false,
+      name:"木漏れ日神社", texture:"komorebi-field",
       audio:{ bgmKey:"komorebi-cicadas-birds", ambienceKeys:[] }
     },
     convenience: {
-      name:"コンビニ", texture:"convenience-field", quiz:false,
+      name:"コンビニ", texture:"convenience-field",
       audio:{ bgmKey:"convenience-night-ambience", ambienceKeys:[] }
     }
   };
@@ -225,7 +224,7 @@ class WalkScene extends Phaser.Scene {
     void this.setupLogin();
     this.setupCollisionMap();
 
-    this.mapTitle = this.add.text(18, 18, "夕凪町　18:42　β 0.53", {
+    this.mapTitle = this.add.text(18, 18, "夕凪町　18:42　β 0.54", {
       fontFamily: "serif", fontSize: "18px", color: "#fff4df",
       backgroundColor: "#2b243088", padding: { x:10, y:7 }
     }).setScrollFactor(0).setDepth(1000);
@@ -234,68 +233,6 @@ class WalkScene extends Phaser.Scene {
       fontFamily: "sans-serif", fontSize: "13px", color: "#f8e8d0",
       backgroundColor: "#2b243066", padding: { x:8, y:5 }
     }).setScrollFactor(0).setDepth(1000);
-  }
-
-  private drawWorld() {
-    const g = this.add.graphics();
-
-    // Ground / evening grass
-    g.fillStyle(0x75856a); g.fillRect(0,0,1800,1200);
-
-    // River
-    g.fillStyle(0x536f83); g.fillRect(0,870,1800,230);
-    for (let x=20; x<1800; x+=95) {
-      g.fillStyle(0x91a6ad, .24); g.fillRect(x, 920 + (x%3)*18, 54, 3);
-    }
-
-    // Roads
-    g.fillStyle(0xb9a88c); g.fillRect(0,455,1800,175);
-    g.fillRect(760,0,190,1200);
-    g.fillStyle(0xd6c3a0,.55);
-    for(let x=0;x<1800;x+=90) g.fillRect(x,540,45,4);
-
-    // Station platform / tracks
-    g.fillStyle(0x4a4646); g.fillRect(0,120,720,92);
-    g.fillStyle(0x292a2c); g.fillRect(0,145,720,8); g.fillRect(0,184,720,8);
-    g.fillStyle(0xd5c57c); g.fillRect(0,215,720,10);
-    this.add.text(55,72,"夕凪駅", {fontFamily:"serif",fontSize:"30px",color:"#eee2c8"});
-
-    // Shopping street buildings
-    const buildings = [
-      [1030,280,220,150,0x9b6659],[1280,300,180,130,0x776c72],[1490,260,240,170,0x8a725d],
-      [1050,660,190,140,0x726c61],[1280,680,230,120,0x8b7868],[1550,650,180,150,0x6f7167]
-    ];
-    buildings.forEach(([x,y,w,h,c])=>{
-      g.fillStyle(c as number); g.fillRect(x as number,y as number,w as number,h as number);
-      g.fillStyle(0x463d42); g.fillRect((x as number)+18,(y as number)+42,48,52);
-      g.fillStyle(0xe6c783,.55); g.fillRect((x as number)+92,(y as number)+42,48,52);
-    });
-
-    // Trees
-    const trees = [[170,330],[330,350],[560,340],[1120,850],[1350,845],[1610,840],[300,760],[520,740]];
-    trees.forEach(([x,y])=>{
-      g.fillStyle(0x4f5849); g.fillRect(x-6,y,12,35);
-      g.fillStyle(0x4e684f); g.fillCircle(x,y-8,29);
-      g.fillStyle(0x64765a); g.fillCircle(x-12,y-17,17);
-    });
-
-    // Bridge
-    g.fillStyle(0x8e8173); g.fillRect(735,850,240,270);
-    g.fillStyle(0x5c5653); g.fillRect(745,850,8,270); g.fillRect(957,850,8,270);
-
-    // Lamps
-    [[990,470],[1260,470],[1510,470],[690,690]].forEach(([x,y])=>{
-      g.fillStyle(0x3e3c3d); g.fillRect(x,y,5,58);
-      g.fillStyle(0xf3c97b,.25); g.fillCircle(x+2,y,28);
-      g.fillStyle(0xffdda0); g.fillCircle(x+2,y,7);
-    });
-
-    // Riverside path
-    g.fillStyle(0xa89b80); g.fillRect(0,815,1800,55);
-    this.add.text(1120,885,"川の音が近い。", {fontFamily:"serif",fontSize:"16px",color:"#d8dfdf",alpha:.65});
-
-    // Evening overlay
-    g.fillStyle(0x563f68,.17); g.fillRect(0,0,1800,1200);
   }
 
   private makePlayer(
@@ -336,6 +273,8 @@ class WalkScene extends Phaser.Scene {
     c.setData("status",status);
     c.setData("remoteDX",0);
     c.setData("remoteDY",0);
+    c.setData("targetX",x);
+    c.setData("targetY",y);
     c.setData("movingUntil",0);
     c.setData("idleAnimating",false);
     c.setData("idleFrame",3);
@@ -499,7 +438,6 @@ class WalkScene extends Phaser.Scene {
       this.setupChat();
       this.applyMapAudio();
       this.setupOptions();
-      this.setupMoneyHud();
       this.connect();
     };
 
@@ -782,7 +720,7 @@ for(const race of usableRaces){
     start.type="button";
     start.textContent="散歩をはじめる";
     Object.assign(start.style,{
-      width:"100%",height:"46px",border:0,borderRadius:"12px",background:"#f2e7c8",fontWeight:"700",cursor:"pointer"
+      width:"100%",height:"46px",border:"0",borderRadius:"12px",background:"#f2e7c8",fontWeight:"700",cursor:"pointer"
     } as Partial<CSSStyleDeclaration>);
     const begin=()=>{
       this.playerName=name.value.trim()||"WALKER";
@@ -929,12 +867,10 @@ for(const race of usableRaces){
       e.stopImmediatePropagation();
 
       const text = input.value.trim();
-      if (text && this.me) {
+      if (text && this.me && this.socket?.readyState === WebSocket.OPEN) {
+        this.socket.send(JSON.stringify({ type: "chat", text }));
         this.showBubble(this.me, text);
         this.addChatLog(this.playerName,text);
-        if (this.socket?.readyState === WebSocket.OPEN) {
-          this.socket.send(JSON.stringify({ type: "chat", text }));
-        }
         input.value = "";
       }
 
@@ -1046,6 +982,12 @@ for(const race of usableRaces){
     if(!this.isBlocked(this.me.x,ny))this.me.y=ny;
   }
 
+  private placeRemote(c:Phaser.GameObjects.Container,x:number,y:number) {
+    c.setPosition(x,y);
+    c.setData("targetX",x);
+    c.setData("targetY",y);
+  }
+
   private clearOtherPlayers() {
     for(const other of this.others.values()) other.destroy(true);
     this.others.clear();
@@ -1053,6 +995,7 @@ for(const race of usableRaces){
 
   private syncOtherPlayers(players:PlayerState[]) {
     const visibleIds=new Set<string>();
+    const now=performance.now();
     for(const p of players){
       if(p.id===this.meId) continue;
       visibleIds.add(p.id);
@@ -1071,7 +1014,9 @@ for(const race of usableRaces){
         other=this.makePlayer(p.x,p.y,p.color,p.name,p.height,race,direction,status);
         this.others.set(p.id,other);
       }else{
-        other.setPosition(p.x,p.y);
+        // 移動中のプレイヤーはsnapshotで引き戻さず、補間先だけ更新する。
+        if(now >= Number(other.getData("movingUntil")||0)) this.placeRemote(other,p.x,p.y);
+        else{ other.setData("targetX",p.x); other.setData("targetY",p.y); }
         this.updatePlayerIdentity(other,p.name,status,direction);
       }
     }
@@ -1094,20 +1039,25 @@ for(const race of usableRaces){
   private startHeartbeat(socket:WebSocket) {
     this.stopHeartbeat();
     this.lastHeartbeatAck=performance.now();
+    this.pendingHeartbeatSince=0;
     const send=()=>{
       if(this.socket!==socket || socket.readyState!==WebSocket.OPEN) return;
-      if(performance.now()-this.lastHeartbeatAck>45000){
+      // 非アクティブタブではタイマーが間引かれるため、「前回送ったheartbeatに
+      // 20秒以上応答がない」場合だけ切断扱いにする。
+      const now=performance.now();
+      if(this.pendingHeartbeatSince && now-this.pendingHeartbeatSince>20000){
         socket.close();
         return;
       }
       socket.send(JSON.stringify({type:"heartbeat"}));
+      if(!this.pendingHeartbeatSince) this.pendingHeartbeatSince=now;
     };
     send();
     this.heartbeatTimer=window.setInterval(send,12000);
   }
 
   private scheduleReconnect() {
-    if(this.loginOpen || this.reconnectTimer!==undefined) return;
+    if(this.loginOpen || this.replacedByNewerConnection || this.reconnectTimer!==undefined) return;
     const delay=Math.min(1000*Math.pow(2,this.reconnectAttempts),8000);
     this.reconnectAttempts=Math.min(this.reconnectAttempts+1,3);
     this.reconnectTimer=window.setTimeout(()=>{
@@ -1124,7 +1074,6 @@ for(const race of usableRaces){
 
     socket.addEventListener("open",()=>void(async()=>{
       if(this.socket!==socket) return;
-      this.reconnectAttempts=0;
 
       let accessToken=this.accessToken;
       if(sharedBackendEnabled && supabase){
@@ -1169,6 +1118,12 @@ for(const race of usableRaces){
       if(msg.type==="auth_error"){
         console.error("Shared backend auth error:",msg.code||msg.message||"unknown");
         this.stopHeartbeat();
+        // DB/認証サーバーの一時障害ではログアウトさせず、再接続で復帰する。
+        const transient=["AUTH_UNAVAILABLE","PROFILE_READ_FAILED","PRESENCE_READ_FAILED","STATE_READ_FAILED","RACE_READ_FAILED"];
+        if(transient.includes(String(msg.code))){
+          socket.close();
+          return;
+        }
         this.loginOpen=true;
         socket.close();
         if(sharedBackendEnabled){
@@ -1180,6 +1135,7 @@ for(const race of usableRaces){
 
       if(msg.type==="heartbeat_ack"){
         this.lastHeartbeatAck=performance.now();
+        this.pendingHeartbeatSince=0;
         if(msg.map===this.currentMap && Array.isArray(msg.players)){
           this.syncOtherPlayers(msg.players as PlayerState[]);
         }
@@ -1195,6 +1151,7 @@ for(const race of usableRaces){
           return;
         }
 
+        this.reconnectAttempts=0;
         this.meId=String(msg.id);
         const p=msg.player as PlayerState;
         this.playerName=p.name;
@@ -1233,7 +1190,7 @@ for(const race of usableRaces){
             current.destroy(true);
             this.others.delete(p.id);
           }else{
-            current.setPosition(p.x,p.y);
+            this.placeRemote(current,p.x,p.y);
             this.updatePlayerIdentity(current,p.name,this.normalizeStatus(p.status),this.normalizeDirection(p.direction));
             return;
           }
@@ -1247,13 +1204,12 @@ for(const race of usableRaces){
 
       if(msg.type==="move"){
         const p=this.others.get(msg.id);
-        if(p){
-          const oldX=p.x, oldY=p.y;
-          p.x=Phaser.Math.Linear(p.x,msg.x,.42);
-          p.y=Phaser.Math.Linear(p.y,msg.y,.42);
-          const rdx=p.x-oldX, rdy=p.y-oldY;
-          p.setData("remoteDX",rdx);
-          p.setData("remoteDY",rdy);
+        if(p && Number.isFinite(msg.x) && Number.isFinite(msg.y)){
+          // 受信位置へは update() で毎フレーム補間し、最後の位置まで必ず到達させる。
+          p.setData("targetX",msg.x);
+          p.setData("targetY",msg.y);
+          p.setData("remoteDX",msg.x-p.x);
+          p.setData("remoteDY",msg.y-p.y);
           if(msg.direction)p.setData("direction",this.normalizeDirection(msg.direction));
           p.setData("movingUntil",performance.now()+180);
         }
@@ -1282,12 +1238,6 @@ for(const race of usableRaces){
         return;
       }
 
-      if(msg.type==="money"){
-        this.money=Number(msg.amount)||0;
-        this.renderMoney();
-        return;
-      }
-
       if(msg.type==="leave"){
         const p=this.others.get(msg.id);
         if(p){ p.destroy(true); this.others.delete(msg.id); }
@@ -1299,17 +1249,54 @@ for(const race of usableRaces){
       }
     });
 
-    socket.addEventListener("close",()=>{
+    socket.addEventListener("close",(event)=>{
       if(this.socket!==socket) return;
       this.stopHeartbeat();
       this.socket=undefined;
       this.clearOtherPlayers();
+      if(event.code===4000){
+        // 同じアカウントが別の画面で接続した。ここから再接続すると
+        // 2つの画面が互いを切断し続けるため、自動再接続しない。
+        this.replacedByNewerConnection=true;
+        this.showReplacedNotice();
+        return;
+      }
       this.scheduleReconnect();
     });
 
     socket.addEventListener("error",()=>{
       if(this.socket===socket && socket.readyState!==WebSocket.CLOSED) socket.close();
     });
+  }
+
+  private showReplacedNotice() {
+    const overlay=document.createElement("div");
+    Object.assign(overlay.style,{
+      position:"fixed",inset:"0",zIndex:"20000",display:"flex",alignItems:"center",justifyContent:"center",
+      background:"rgba(20,18,24,.86)",fontFamily:"sans-serif"
+    } as Partial<CSSStyleDeclaration>);
+    const box=document.createElement("div");
+    Object.assign(box.style,{
+      width:"min(360px, calc(100vw - 32px))",padding:"22px",borderRadius:"14px",
+      background:"#2d2933",color:"#fff8e8",textAlign:"center",lineHeight:"1.6"
+    } as Partial<CSSStyleDeclaration>);
+    const text=document.createElement("div");
+    text.textContent="別の画面で同じアカウントが接続したため、この画面は切断されました。";
+    const button=document.createElement("button");
+    button.type="button";
+    button.textContent="この画面で再接続";
+    Object.assign(button.style,{
+      marginTop:"16px",width:"100%",height:"44px",border:"0",borderRadius:"10px",
+      background:"#f2e7c8",color:"#242027",fontWeight:"700",cursor:"pointer"
+    } as Partial<CSSStyleDeclaration>);
+    button.onclick=()=>{
+      overlay.remove();
+      this.replacedByNewerConnection=false;
+      this.connect();
+    };
+    box.append(text,button);
+    overlay.appendChild(box);
+    document.body.appendChild(overlay);
   }
 
   private stopMapAudio() {
@@ -1330,97 +1317,16 @@ for(const race of usableRaces){
     const config=this.mapData[this.currentMap].audio;
 
     if(config.bgmKey && this.cache.audio.exists(config.bgmKey)){
-      this.activeMapBgm=this.sound.add(config.bgmKey,{loop:true,volume:this.masterVolume});
+      this.activeMapBgm=this.sound.add(config.bgmKey,{loop:true,volume:this.masterVolume}) as Phaser.Sound.HTML5AudioSound;
       this.activeMapBgm.play();
     }
 
     for(const key of config.ambienceKeys){
       if(!this.cache.audio.exists(key)) continue;
-      const sound=this.sound.add(key,{loop:true,volume:this.masterVolume});
+      const sound=this.sound.add(key,{loop:true,volume:this.masterVolume}) as Phaser.Sound.HTML5AudioSound;
       sound.play();
       this.activeMapAmbience.push(sound);
     }
-  }
-
-  private setupMoneyHud() {
-    const hud=document.createElement("div");
-    Object.assign(hud.style,{position:"fixed",left:"14px",top:"14px",zIndex:"30",
-      padding:"9px 14px",border:"1px solid #ffffff55",borderRadius:"8px",
-      background:"#161616cc",color:"#fff",font:"700 16px system-ui",pointerEvents:"none"});
-    document.body.appendChild(hud);
-    this.moneyHud=hud;
-    this.renderMoney();
-  }
-
-  private renderMoney() {
-    if(this.moneyHud) this.moneyHud.textContent=`所持金　${this.money} 夏円`;
-  }
-
-  private setupTownQuiz() {
-    const panel=document.createElement("div");
-    Object.assign(panel.style,{display:"none",position:"fixed",left:"50%",top:"50%",
-      transform:"translate(-50%,-50%)",zIndex:"45",width:"min(560px,88vw)",boxSizing:"border-box",
-      background:"#151515f2",color:"#fff",border:"1px solid #ffffff55",borderRadius:"12px",
-      padding:"22px",fontFamily:"system-ui",boxShadow:"0 18px 55px #0008"});
-    document.body.appendChild(panel);
-    this.quizPanel=panel;
-  }
-
-  private showTownQuiz(msg:any) {
-    if(!this.quizPanel) return;
-    this.activeQuizId=String(msg.id);
-    const panel=this.quizPanel;
-    panel.innerHTML="";
-    panel.style.display="block";
-    const announce=document.createElement("div");
-    announce.textContent="📢 夕凪町 町内アナウンス";
-    Object.assign(announce.style,{fontSize:"14px",opacity:".72",marginBottom:"7px"});
-    const title=document.createElement("div");
-    title.textContent="教養クイズ　正解で100夏円";
-    Object.assign(title.style,{fontSize:"20px",fontWeight:"800",marginBottom:"14px"});
-    const q=document.createElement("div");
-    q.textContent=String(msg.question);
-    Object.assign(q.style,{fontSize:"17px",lineHeight:"1.6",marginBottom:"14px"});
-    panel.append(announce,title,q);
-    (msg.options||[]).forEach((text:string,i:number)=>{
-      const b=document.createElement("button");
-      b.textContent=`${["A","B","C","D"][i]}. ${text}`;
-      Object.assign(b.style,{display:"block",width:"100%",textAlign:"left",padding:"12px",
-        margin:"8px 0",borderRadius:"7px",border:"1px solid #ffffff44",background:"#292929",
-        color:"#fff",cursor:"pointer",fontSize:"15px"});
-      b.addEventListener("click",()=>{
-        panel.querySelectorAll("button").forEach(x=>(x as HTMLButtonElement).disabled=true);
-        this.socket?.send(JSON.stringify({type:"quiz_answer",id:this.activeQuizId,answer:i}));
-      });
-      panel.appendChild(b);
-    });
-    const foot=document.createElement("div");
-    foot.textContent="町にいるみんなが同じ問題に挑戦中。受付は20秒間。";
-    Object.assign(foot.style,{fontSize:"12px",opacity:".58",marginTop:"12px"});
-    panel.appendChild(foot);
-  }
-
-  private showQuizResult(msg:any) {
-    if(!this.quizPanel || this.activeQuizId!==String(msg.id)) return;
-    this.money=Number(msg.money)||this.money;
-    this.renderMoney();
-    const panel=this.quizPanel;
-    const result=document.createElement("div");
-    result.textContent=msg.correct ? `正解！ +100夏円　（${this.money}夏円）` : `不正解。正解は「${msg.correctText}」`;
-    Object.assign(result.style,{marginTop:"14px",padding:"12px",borderRadius:"7px",
-      background:msg.correct?"#24452f":"#4a2929",fontWeight:"700"});
-    panel.appendChild(result);
-    setTimeout(()=>this.closeTownQuiz(),3500);
-  }
-
-  private closeTownQuiz(message?:string) {
-    if(!this.quizPanel) return;
-    if(message){
-      const note=document.createElement("div"); note.textContent=message;
-      Object.assign(note.style,{marginTop:"12px",opacity:".7"}); this.quizPanel.appendChild(note);
-      setTimeout(()=>{if(this.quizPanel)this.quizPanel.style.display="none";},1200);
-    } else this.quizPanel.style.display="none";
-    this.activeQuizId=null;
   }
 
   private setupOptions() {
@@ -1605,9 +1511,9 @@ for(const race of usableRaces){
 
   private updateMapTitle() {
     this.mapTitle?.setText(
-      this.currentMap==="yunagicho" ? "夕凪町　18:42　β 0.53" :
-      this.currentMap==="komorebi" ? "木漏れ日神社　β 0.53" :
-      "コンビニ　β 0.53"
+      this.currentMap==="yunagicho" ? "夕凪町　18:42　β 0.54" :
+      this.currentMap==="komorebi" ? "木漏れ日神社　β 0.54" :
+      "コンビニ　β 0.54"
     );
   }
 
@@ -1630,7 +1536,6 @@ for(const race of usableRaces){
     this.others.clear();
     this.me.setPosition(x,y);
     this.updateMapTitle();
-    if(map!=="yunagicho" && this.quizPanel?.style.display!=="none") this.closeTownQuiz("");
     if(this.socket?.readyState===WebSocket.OPEN){
       this.socket.send(JSON.stringify({
         type:"move",
@@ -1692,13 +1597,15 @@ for(const race of usableRaces){
     if(this.me && this.coordHud && this.coordsVisible){
       this.coordHud.textContent=`${this.mapData[this.currentMap].name}  X:${Math.round(this.me.x)}  Y:${Math.round(this.me.y)}`;
     }
-    if (this.loginOpen || this.isDomEditing()) return;
-    if(!this.me)return;
-    this.checkMapTransition();
-
-    // 他プレイヤーも描画フレームごとに歩行/立ちアニメーションする。
+    // 他プレイヤーは、自分がチャット入力中でも描画フレームごとに補間・アニメーションする。
     const now=performance.now();
+    const follow=1-Math.pow(.001,delta/1000*4);
     for(const other of this.others.values()){
+      const tx=Number(other.getData("targetX")), ty=Number(other.getData("targetY"));
+      if(Number.isFinite(tx) && Number.isFinite(ty)){
+        if(Math.abs(tx-other.x)<.5 && Math.abs(ty-other.y)<.5) other.setPosition(tx,ty);
+        else other.setPosition(Phaser.Math.Linear(other.x,tx,follow),Phaser.Math.Linear(other.y,ty,follow));
+      }
       const moving=now < Number(other.getData("movingUntil")||0);
       this.animateWalker(
         other,
@@ -1707,6 +1614,14 @@ for(const race of usableRaces){
         Number(other.getData("remoteDY")||0)
       );
     }
+
+    if (this.loginOpen || this.isDomEditing()) {
+      // 移動中にチャット入力を開いた場合も、止まった位置を送っておく。
+      if(this.positionUnsent && time-this.lastSent>50) { this.sendPosition(); this.lastSent=time; }
+      return;
+    }
+    if(!this.me)return;
+    this.checkMapTransition();
 
     const typing =
       this.loginOpen ||
@@ -1736,19 +1651,28 @@ for(const race of usableRaces){
 
       this.animateWalker(this.me,actuallyMoved,dx,dy);
 
-      if(actuallyMoved && time-this.lastSent>50 && this.socket?.readyState===WebSocket.OPEN){
-        this.socket.send(JSON.stringify({
-          type:"move",
-          x:Math.round(this.me.x),
-          y:Math.round(this.me.y),
-          map:this.currentMap,
-          direction:this.normalizeDirection(this.me.getData("direction"))
-        }));
-        this.lastSent=time;
-      }
+      if(actuallyMoved) this.positionUnsent=true;
     } else {
       this.animateWalker(this.me,false);
     }
+
+    // 50ms間隔で送信し、止まった直後の最終位置も必ず送る。
+    if(this.positionUnsent && time-this.lastSent>50 && this.socket?.readyState===WebSocket.OPEN){
+      this.sendPosition();
+      this.lastSent=time;
+    }
+  }
+
+  private sendPosition() {
+    if(!this.me || this.socket?.readyState!==WebSocket.OPEN) return;
+    this.socket.send(JSON.stringify({
+      type:"move",
+      x:Math.round(this.me.x),
+      y:Math.round(this.me.y),
+      map:this.currentMap,
+      direction:this.normalizeDirection(this.me.getData("direction"))
+    }));
+    this.positionUnsent=false;
   }
 }
 

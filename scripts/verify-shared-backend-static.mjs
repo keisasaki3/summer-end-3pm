@@ -31,7 +31,9 @@ const checks={
   service_role_server_only:serverShared.includes("SUPABASE_SERVICE_ROLE_KEY") && !main.includes("SUPABASE_SERVICE_ROLE_KEY") && !shared.includes("SUPABASE_SERVICE_ROLE_KEY"),
   fixed_height:server.includes("player.height = 1") && !main.includes('selectedHeight'),
   status_server_write:server.includes("setPresenceStatus(player.id, nextStatus)"),
-  map_transition_save:server.includes("await persistPlayerState(player, true)"),
+  map_transition_save:server.includes("void persistPlayerState(player, true);\n      return;"),
+  logout_save:server.includes("await persistPlayerState(player, true)"),
+  quiz_removed:!/quiz/i.test(main) && !/quiz/i.test(server),
 };
 let failed=0;
 for(const [name,ok] of Object.entries(checks)){
