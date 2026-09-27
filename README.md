@@ -2,6 +2,15 @@
 
 「みんなで歩けるだけ」の最小オンライン散歩空間。
 
+## 本番
+
+- 公開URL: https://summer-end-3pm.onrender.com（Render）
+- 現行仕様の正本: `SPEC.md`
+- 実装引き継ぎ: `docs/IMPLEMENTATION_HANDOFF.md`
+- 共通Auth / DB: `keisasaki3/keisasaki3.github.io/shared-world-core/`
+
+以下の「WAN公開モード」「Cloudflare Quick Tunnel」「ワンクリックアップデーター」は、Render移行前の旧公開方式として記録を残している。
+
 ## 技術
 
 - Phaser 3
@@ -69,7 +78,7 @@ http://localhost:8080
 
 ---
 
-# Cloudflare Quick Tunnel でWAN公開
+# Cloudflare Quick Tunnel でWAN公開（旧方式）
 
 Cloudflare の `cloudflared` をインストールした後、
 
@@ -100,6 +109,10 @@ winget install --id Cloudflare.cloudflared
 インストール後、一度PowerShellを開き直してください。
 
 ---
+
+# 変更履歴
+
+以下は過去の変更履歴。現行仕様は `SPEC.md` を正とする。
 
 ## v0.04変更点
 
