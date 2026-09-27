@@ -443,7 +443,7 @@ wss.on("close",()=>{
 
 server.listen(PORT, "0.0.0.0", () => {
   console.log("");
-  console.log("午後三時、夏の果て。 β 0.54");
+  console.log("午後三時、夏の果て。 β 0.55");
   console.log(`Server: http://localhost:${PORT}`);
   console.log(`Mode: ${DEV ? "development websocket-only" : "production single-URL"}`);
   console.log(`Shared backend: ${sharedBackend.enabled ? "Supabase" : "legacy compatibility"}`);
