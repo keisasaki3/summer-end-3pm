@@ -8,6 +8,10 @@
 - `../CHARACTER_SPRITE_SPEC.md` — キャラクタースプライト規格
 - `SHARED_BACKEND.md` — 人生クエストとの共通認証/DB接続仕様
 
+## Ideas (未決)
+
+- `IDEAS.md` — 未決アイデア置き場。採用が明示された項目だけ実装する
+
 ## Shared core
 
 共通認証・共通プレイヤー・種族・Presence・DBスキーマの正本は、現在以下に置く。
