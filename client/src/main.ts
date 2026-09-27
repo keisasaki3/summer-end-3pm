@@ -83,6 +83,8 @@ class WalkScene extends Phaser.Scene {
   private rectBlockers: Phaser.Geom.Rectangle[] = [];
   private circleBlockers: Phaser.Geom.Circle[] = [];
   private polygonBlockers: Phaser.Geom.Polygon[] = [];
+  // 空でないマップでは、この範囲の外を通行不可にする。
+  private walkablePolygons: Phaser.Geom.Polygon[] = [];
   private currentMap: MapId = "yunagicho";
   private background?: Phaser.GameObjects.Image;
   private mapTitle?: Phaser.GameObjects.Text;
@@ -226,7 +228,7 @@ class WalkScene extends Phaser.Scene {
     void this.setupLogin();
     this.setupCollisionMap();
 
-    this.mapTitle = this.add.text(18, 18, "夕凪町　18:42　β 0.56", {
+    this.mapTitle = this.add.text(18, 18, "夕凪町　18:42　β 0.57", {
       fontFamily: "serif", fontSize: "18px", color: "#fff4df",
       backgroundColor: "#2b243088", padding: { x:10, y:7 }
     }).setScrollFactor(0).setDepth(1000);
@@ -890,53 +892,15 @@ for(const race of usableRaces){
 
 
   private setupCollisionMap() {
-    this.rectBlockers=[]; this.circleBlockers=[]; this.polygonBlockers=[];
+    this.rectBlockers=[]; this.circleBlockers=[]; this.polygonBlockers=[]; this.walkablePolygons=[];
     const P=(pts:number[][])=>this.polygonBlockers.push(new Phaser.Geom.Polygon(pts.flat()));
+    const W=(pts:number[][])=>this.walkablePolygons.push(new Phaser.Geom.Polygon(pts.flat()));
     if(this.currentMap==="yunagicho"){
-      // 左上の神社周辺は当たり判定を大きく撤去。鳥居～階段～上端を自由に通行可能。
-      // Main shop block ("浦のや") and attached frontage; sidewalk edge left open.
-    P([[346,126],[710,126],[745,213],[732,354],[699,426],[650,454],[557,464],[470,451],[402,417],[362,353]]);
-
-    // Deep center-left/center houses bordering the narrow northbound lane.
-    P([[620,0],[936,0],[940,176],[900,207],[862,255],[825,325],[790,390],[752,431],[718,417],[740,315],[748,211],[714,131]]);
-
-    // Newspaper office / greenery / bus-stop island. Road around it remains open.
-    P([[948,0],[1290,0],[1300,135],[1278,219],[1263,305],[1250,367],[1217,416],[1173,461],[1094,478],[1017,465],[994,405],[1004,323],[1007,217],[970,142]]);
-    // Bus shelter itself
-    P([[1090,349],[1282,344],[1300,431],[1271,474],[1111,478],[1084,442]]);
-
-    // Far-right sea / breakwater beyond waterfront road.
-    P([[1412,0],[1536,0],[1536,497],[1490,489],[1462,448],[1447,385],[1433,303],[1421,214]]);
-    // Right edge sea below waterfront railing
-    P([[1484,462],[1536,449],[1536,864],[1378,864],[1396,746],[1438,660],[1468,563]]);
-
-    // Bottom-left foreground houses, walls and planting.
-    P([[0,558],[88,572],[170,613],[242,651],[322,682],[389,704],[405,864],[0,864]]);
-    P([[258,676],[474,679],[516,733],[526,864],[386,864],[382,742]]);
-
-    // Bottom-center garden/wall: keeps only the road descending to bridge open.
-    // 真ん中下の道路はコンビニへの通路として開放。
-
-    // Canal/bridge left parapet and lower-right water mass.
-    P([[958,638],[1060,609],[1192,574],[1334,543],[1392,552],[1382,614],[1302,637],[1198,667],[1082,699],[1018,722]]);
-    // X927〜1208 / Y848周辺はコンビニ往復用の道路として完全開放。
-
-    // Small solid objects on otherwise walkable pavement.
-    P([[391,630],[419,630],[424,700],[390,701]]); // utility post
-    P([[985,453],[1045,446],[1060,495],[1004,505]]); // flower/stop island
-
-    // 下中央の石垣・柵・植え込み（コンビニへ下る道の左側）。
-    P([[430,690],[830,690],[870,730],[1000,864],[430,864]]);
-    // 右上の海（新聞社と防波堤の間）。ガードレールより海側。
-    P([[1290,0],[1421,0],[1433,303],[1447,370],[1272,294],[1278,219],[1300,135]]);
-    // 橋の下の護岸・水路。
-    P([[1018,722],[1382,614],[1392,864],[1212,864]]);
-    // 左の掲示板・灯籠・茂み。
-    P([[56,340],[232,340],[232,478],[56,478]]);
-    P([[72,168],[108,168],[108,228],[72,228]]);
-    P([[210,156],[246,156],[246,228],[210,228]]);
-    P([[0,400],[48,400],[48,492],[0,492]]);
-    P([[0,490],[160,500],[170,560],[88,572],[0,558]]);
+      // β0.57: 背景画像差し替えに合わせ、歩ける範囲（道路・歩道）を多角形で指定する。
+      // 足元の5点がすべてこの範囲内にある場合だけ移動できる。
+      // 範囲: 商店前の歩道、中央の交差点、北へ上る道、防波堤沿いの道（階段手前まで）、
+      // 右下へ下る道と物置前の路地。家・屋根・塀・植え込み・海には入れない。
+      W([[140,478],[150,462],[230,460],[270,455],[470,450],[540,443],[560,445],[600,428],[660,408],[700,392],[760,360],[782,330],[797,300],[812,275],[830,255],[856,222],[858,188],[815,168],[806,130],[812,88],[856,88],[848,118],[855,148],[883,152],[927,162],[970,170],[1000,176],[1068,194],[1163,226],[1283,262],[1335,280],[1335,312],[1283,296],[1163,260],[1068,230],[1000,212],[977,222],[950,232],[900,252],[880,270],[882,330],[860,335],[820,360],[800,385],[782,398],[768,425],[770,505],[790,515],[923,598],[963,605],[1150,716],[1183,716],[1185,648],[1258,648],[1263,748],[1418,818],[1470,864],[820,864],[760,800],[705,760],[690,720],[665,680],[625,635],[565,595],[480,590],[420,570],[330,555],[290,540],[250,515],[140,500]]);
     } else if(this.currentMap==="komorebi") {
       // 木漏れ日神社: 中央参道・拝殿前広場・右参道・手水舎周辺を歩行可能に。
       P([[0,0],[145,0],[148,190],[202,254],[250,309],[286,386],[246,454],[0,454]]);
@@ -983,13 +947,8 @@ for(const race of usableRaces){
 
   private isBlocked(x:number,y:number,r=10) {
     if(x<16||x>1520)return true;
-    // 夕凪町コンビニ接続道路: 指定範囲周辺は一切の当たり判定を持たせない。
-    // 下端だけでなく少し上まで開け、帰還スポーン後に確実に移動できるようにする。
-    if(this.currentMap==="yunagicho" && x>=927 && x<=1208 && y>=760) return false;
     if(this.currentMap==="yunagicho"){
-      if(y>848 && !(x>=1012&&x<=1140)) return true;
       if(y<16)return true;
-      if(y<80 && !(x>=70&&x<=300)) return true;
     }else if(this.currentMap==="komorebi"){
       if(y<16)return true;
       if(y>848 && !(x>=720&&x<=930)) return true;
@@ -1001,8 +960,27 @@ for(const race of usableRaces){
     for(const rect of this.rectBlockers)if(Phaser.Geom.Intersects.CircleToRectangle(hit,rect))return true;
     for(const c of this.circleBlockers){const d=r+c.radius,dx=x-c.x,dy=y-c.y;if(dx*dx+dy*dy<d*d)return true;}
     const samples=[[x,y],[x-r,y],[x+r,y],[x,y-r],[x,y+r]];
+    if(this.walkablePolygons.length && !samples.every(([px,py])=>this.walkablePolygons.some(poly=>Phaser.Geom.Polygon.Contains(poly,px,py))))return true;
     for(const poly of this.polygonBlockers)if(samples.some(([px,py])=>Phaser.Geom.Polygon.Contains(poly,px,py)))return true;
     return false;
+  }
+
+  // 保存位置が壁・建物の中（背景差し替えや判定変更で通行不可になった場所）なら、
+  // いちばん近い通行可能な位置を返す。
+  private findOpenPosition(x:number,y:number) {
+    if(!this.isBlocked(x,y)) return {x,y};
+    for(let radius=8; radius<=1200; radius+=8){
+      const steps=Math.max(16,Math.ceil(radius/4));
+      let best:{x:number,y:number}|undefined;
+      for(let i=0;i<steps;i++){
+        const a=i/steps*Math.PI*2;
+        const nx=Math.round(x+Math.cos(a)*radius), ny=Math.round(y+Math.sin(a)*radius);
+        if(nx<16||nx>1520||ny<80||ny>848||this.isBlocked(nx,ny)) continue;
+        if(!best || Math.abs(ny-y)<Math.abs(best.y-y)) best={x:nx,y:ny};
+      }
+      if(best) return best;
+    }
+    return {x,y};
   }
 
   private tryMovePlayer(dx:number,dy:number,delta:number) {
@@ -1203,6 +1181,14 @@ for(const race of usableRaces){
         this.background?.setTexture(this.mapData[this.currentMap].texture);
         this.background?.setDisplaySize(1536,864);
         this.setupCollisionMap();
+        const open=this.findOpenPosition(this.me.x,this.me.y);
+        if(open.x!==this.me.x || open.y!==this.me.y){
+          this.me.setPosition(open.x,open.y);
+          socket.send(JSON.stringify({
+            type:"move",x:open.x,y:open.y,map:this.currentMap,
+            direction:this.normalizeDirection(this.me.getData("direction"))
+          }));
+        }
         this.applyMapAudio();
         this.updateMapTitle();
         this.cameras.main.startFollow(this.me,true,.08,.08);
@@ -1545,9 +1531,9 @@ for(const race of usableRaces){
 
   private updateMapTitle() {
     this.mapTitle?.setText(
-      this.currentMap==="yunagicho" ? "夕凪町　18:42　β 0.56" :
-      this.currentMap==="komorebi" ? "木漏れ日神社　β 0.56" :
-      "コンビニ　β 0.56"
+      this.currentMap==="yunagicho" ? "夕凪町　18:42　β 0.57" :
+      this.currentMap==="komorebi" ? "木漏れ日神社　β 0.57" :
+      "コンビニ　β 0.57"
     );
   }
 
@@ -1585,7 +1571,8 @@ for(const race of usableRaces){
   private checkMapTransition() {
     if(!this.me || this.transitionLock) return;
     if(this.currentMap==="yunagicho"){
-      if(this.me.x>=70 && this.me.x<=300 && this.me.y<=105){
+      // 暫定: 北へ上る道の上端 → 木漏れ日神社（正式なワープ位置は未設定）
+      if(this.me.x>=805 && this.me.x<=860 && this.me.y<=104){
         this.switchMap("komorebi",820,805); return;
       }
       // 夕凪町・真ん中下の道路 → コンビニ
@@ -1594,7 +1581,7 @@ for(const race of usableRaces){
       }
     }else if(this.currentMap==="komorebi"){
       if(this.me.x>=720 && this.me.x<=930 && this.me.y>=835){
-        this.switchMap("yunagicho",170,125);
+        this.switchMap("yunagicho",830,140);
       }
     }else{
       // コンビニ右端の道路（上下中央） → 夕凪町
