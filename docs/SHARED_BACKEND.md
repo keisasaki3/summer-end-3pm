@@ -12,7 +12,7 @@
 - `supabase/migrations/001_initial_schema.sql`
 - `supabase/seed.sql`
 
-この文書は夏の果側の接続・責務だけを記載する。
+この文書は夏の果て側の接続・責務だけを記載する。
 
 ## 実装ファイル
 
