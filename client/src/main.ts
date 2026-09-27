@@ -1688,14 +1688,36 @@ for(const race of usableRaces){
   }
 }
 
-new Phaser.Game({
+// スマホ（タッチ操作かつ短辺600px以下）は画面サイズに合わせた専用表示にする。
+// PCは従来どおり1280x720固定。
+const IS_MOBILE =
+  window.matchMedia("(pointer: coarse)").matches &&
+  Math.min(window.innerWidth, window.innerHeight) <= 600;
+
+// スマホでは画面1pxをワールド1pxとして表示し、カメラがプレイヤーを追う。
+// 画面がマップ(1536x864)より大きい方向だけ拡大して、マップ外が見えないようにする。
+function mobileGameSize() {
+  const w=Math.max(1,window.innerWidth), h=Math.max(1,window.innerHeight);
+  const s=Math.max(1,w/1536,h/864);
+  return { width:Math.round(w/s), height:Math.round(h/s) };
+}
+
+if(IS_MOBILE) document.documentElement.classList.add("mobile");
+const gameSize=IS_MOBILE ? mobileGameSize() : { width:1280, height:720 };
+
+const game=new Phaser.Game({
   type:Phaser.AUTO,
   parent:"app",
-  width:1280,
-  height:720,
+  width:gameSize.width,
+  height:gameSize.height,
   backgroundColor:"#0d0d0d",
   scene:WalkScene,
-  scale:{
+  scale:IS_MOBILE ? {
+    mode:Phaser.Scale.FIT,
+    autoCenter:Phaser.Scale.CENTER_BOTH,
+    width:gameSize.width,
+    height:gameSize.height
+  } : {
     mode:Phaser.Scale.NONE,
     autoCenter:Phaser.Scale.NO_CENTER,
     width:1280,
@@ -1703,3 +1725,12 @@ new Phaser.Game({
   },
   render:{pixelArt:true,antialias:false}
 });
+
+if(IS_MOBILE){
+  const resizeGame=()=>{
+    const next=mobileGameSize();
+    game.scale.resize(next.width,next.height);
+  };
+  window.addEventListener("resize",resizeGame);
+  window.addEventListener("orientationchange",()=>setTimeout(resizeGame,200));
+}
