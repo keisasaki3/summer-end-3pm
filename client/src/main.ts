@@ -56,7 +56,7 @@ class WalkScene extends Phaser.Scene {
   private heartbeatTimer?: number;
   private reconnectAttempts = 0;
   private lastHeartbeatAck = 0;
-  private lastHeartbeatSent = 0;
+  private pendingHeartbeatSince = 0;
   private lastSent = 0;
   private positionUnsent = false;
   private replacedByNewerConnection = false;
@@ -1039,18 +1039,18 @@ for(const race of usableRaces){
   private startHeartbeat(socket:WebSocket) {
     this.stopHeartbeat();
     this.lastHeartbeatAck=performance.now();
-    this.lastHeartbeatSent=0;
+    this.pendingHeartbeatSince=0;
     const send=()=>{
       if(this.socket!==socket || socket.readyState!==WebSocket.OPEN) return;
       // 非アクティブタブではタイマーが間引かれるため、「前回送ったheartbeatに
       // 20秒以上応答がない」場合だけ切断扱いにする。
       const now=performance.now();
-      if(this.lastHeartbeatSent>this.lastHeartbeatAck && now-this.lastHeartbeatSent>20000){
+      if(this.pendingHeartbeatSince && now-this.pendingHeartbeatSince>20000){
         socket.close();
         return;
       }
       socket.send(JSON.stringify({type:"heartbeat"}));
-      this.lastHeartbeatSent=now;
+      if(!this.pendingHeartbeatSince) this.pendingHeartbeatSince=now;
     };
     send();
     this.heartbeatTimer=window.setInterval(send,12000);
@@ -1074,7 +1074,6 @@ for(const race of usableRaces){
 
     socket.addEventListener("open",()=>void(async()=>{
       if(this.socket!==socket) return;
-      this.reconnectAttempts=0;
 
       let accessToken=this.accessToken;
       if(sharedBackendEnabled && supabase){
@@ -1136,6 +1135,7 @@ for(const race of usableRaces){
 
       if(msg.type==="heartbeat_ack"){
         this.lastHeartbeatAck=performance.now();
+        this.pendingHeartbeatSince=0;
         if(msg.map===this.currentMap && Array.isArray(msg.players)){
           this.syncOtherPlayers(msg.players as PlayerState[]);
         }
@@ -1151,6 +1151,7 @@ for(const race of usableRaces){
           return;
         }
 
+        this.reconnectAttempts=0;
         this.meId=String(msg.id);
         const p=msg.player as PlayerState;
         this.playerName=p.name;

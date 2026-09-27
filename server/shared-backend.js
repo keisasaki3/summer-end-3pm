@@ -39,7 +39,7 @@ async function verifyAccessToken(accessToken) {
   }
   const admin = requireClient();
   const { data, error } = await admin.auth.getUser(accessToken.trim());
-  if (error && !(error.status >= 400 && error.status < 500)) {
+  if (error && (error.status === 429 || !(error.status >= 400 && error.status < 500))) {
     // Supabase側の一時障害。トークン自体は有効な可能性があるのでログアウトさせない。
     throw backendError("AUTH_UNAVAILABLE", "認証サーバーに接続できませんでした。", error);
   }
