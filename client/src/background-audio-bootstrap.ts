@@ -269,37 +269,6 @@ if (html5ManagerProto && !html5ManagerProto.__summerEndSeamlessLoopPatched) {
   html5ManagerProto.__summerEndSeamlessLoopPatched = true;
 }
 
-// The Phaser map title occupies the upper-left corner of the game canvas. The
-// money HUD is created later by main.ts as a fixed DOM element, so move it into
-// the upper-right HUD stack after login instead of letting both occupy ~14px/14px.
-const positionMoneyHud = () => {
-  const hud = Array.from(document.body.children).find(
-    (child): child is HTMLDivElement =>
-      child instanceof HTMLDivElement && (child.textContent ?? "").startsWith("所持金")
-  );
-  if (!hud) return false;
-
-  Object.assign(hud.style, {
-    left: "auto",
-    right: "14px",
-    top: "96px",
-    maxWidth: "calc(100vw - 28px)",
-    boxSizing: "border-box",
-  } as Partial<CSSStyleDeclaration>);
-  return true;
-};
-
-const installMoneyHudLayout = () => {
-  if (positionMoneyHud()) return;
-  const observer = new MutationObserver(() => {
-    if (positionMoneyHud()) observer.disconnect();
-  });
-  observer.observe(document.body, { childList: true, subtree: true, characterData: true });
-};
-
-if (document.body) installMoneyHudLayout();
-else window.addEventListener("DOMContentLoaded", installMoneyHudLayout, { once: true });
-
 const OriginalGame = phaserRuntime.Game;
 
 phaserRuntime.Game = class BackgroundAudioGame extends OriginalGame {

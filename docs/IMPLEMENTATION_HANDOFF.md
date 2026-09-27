@@ -1,6 +1,6 @@
 # 午後三時、夏の果て — Implementation Handoff
 
-更新: 2026-09-26 / β 0.51
+更新: 2026-09-27 / β 0.54
 
 ## Read first
 
@@ -30,10 +30,11 @@
 - no per-player avatar customization; race fully determines appearance
 - do not write coordinates to Supabase per frame/move packet
 - reconnect with an existing local player must prefer client live location over old DB snapshot
+- replaced socket (close 4000) must not auto-reconnect
 - keep 12s heartbeat, 25s ping, authoritative heartbeat snapshot, 1/2/4/8 reconnect
 - duplicate account: newest socket wins
 - preserve 3 current maps, chat and Y-sort
-- quiz remains disabled
+- old quiz and money (夏円) were removed in β 0.54; do not restore them
 
 ## Files
 
