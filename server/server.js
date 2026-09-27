@@ -294,7 +294,7 @@ function touchPlayerPresence(player) {
 function serveStatic(req, res) {
   if (DEV) {
     res.writeHead(200, { "Content-Type": "text/plain; charset=utf-8" });
-    res.end("午後三時、夏の果。 WebSocket dev server");
+    res.end("午後三時、夏の果て。 WebSocket dev server");
     return;
   }
 
@@ -604,7 +604,7 @@ if (QUIZ_ENABLED) {
 
 server.listen(PORT, "0.0.0.0", () => {
   console.log("");
-  console.log("午後三時、夏の果。 β 0.49");
+  console.log("午後三時、夏の果て。 β 0.53");
   console.log(`Server: http://localhost:${PORT}`);
   console.log(`Mode: ${DEV ? "development websocket-only" : "production single-URL"}`);
   console.log(`Shared backend: ${sharedBackend.enabled ? "Supabase" : "legacy compatibility"}`);
