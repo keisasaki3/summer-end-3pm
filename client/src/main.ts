@@ -224,7 +224,7 @@ class WalkScene extends Phaser.Scene {
     void this.setupLogin();
     this.setupCollisionMap();
 
-    this.mapTitle = this.add.text(18, 18, "夕凪町　18:42　β 0.54", {
+    this.mapTitle = this.add.text(18, 18, "夕凪町　18:42　β 0.55", {
       fontFamily: "serif", fontSize: "18px", color: "#fff4df",
       backgroundColor: "#2b243088", padding: { x:10, y:7 }
     }).setScrollFactor(0).setDepth(1000);
@@ -917,6 +917,19 @@ for(const race of usableRaces){
     // Small solid objects on otherwise walkable pavement.
     P([[391,630],[419,630],[424,700],[390,701]]); // utility post
     P([[985,453],[1045,446],[1060,495],[1004,505]]); // flower/stop island
+
+    // 下中央の石垣・柵・植え込み（コンビニへ下る道の左側）。
+    P([[430,690],[830,690],[870,730],[1000,864],[430,864]]);
+    // 右上の海（新聞社と防波堤の間）。ガードレールより海側。
+    P([[1290,0],[1421,0],[1433,303],[1447,370],[1272,294],[1278,219],[1300,135]]);
+    // 橋の下の護岸・水路。
+    P([[1018,722],[1382,614],[1392,864],[1212,864]]);
+    // 左の掲示板・灯籠・茂み。
+    P([[56,340],[232,340],[232,478],[56,478]]);
+    P([[72,168],[108,168],[108,228],[72,228]]);
+    P([[210,156],[246,156],[246,228],[210,228]]);
+    P([[0,400],[48,400],[48,492],[0,492]]);
+    P([[0,490],[160,500],[170,560],[88,572],[0,558]]);
     } else if(this.currentMap==="komorebi") {
       // 木漏れ日神社: 中央参道・拝殿前広場・右参道・手水舎周辺を歩行可能に。
       P([[0,0],[145,0],[148,190],[202,254],[250,309],[286,386],[246,454],[0,454]]);
@@ -938,6 +951,16 @@ for(const race of usableRaces){
       P([[214,515],[381,508],[437,569],[409,654],[250,670],[190,607]]);
       // 右下ベンチ・植栽
       P([[1168,631],[1455,612],[1474,730],[1380,778],[1200,756]]);
+      // 拝殿右の大木・茂み・柵
+      P([[1116,0],[1326,118],[1296,228],[1258,322],[1242,408],[1200,446],[1068,444],[1044,360],[1022,326],[1044,252],[1080,146],[1130,82]]);
+      // 右側の茂み・灯籠
+      P([[1350,353],[1460,286],[1460,646],[1368,600],[1338,504]]);
+      // 絵馬掛け右の小さな柵
+      P([[714,354],[792,354],[792,434],[714,434]]);
+      // 左の灯籠
+      P([[410,520],[478,520],[478,602],[410,602]]);
+      // 南参道出口の門柱
+      P([[640,650],[745,690],[745,780],[704,780],[630,700]]);
     } else {
       // コンビニ: 駐車場を主な歩行エリアにする。
       P([[410,255],[1115,255],[1115,510],[410,510]]); // 店舗本体
@@ -946,6 +969,8 @@ for(const race of usableRaces){
       P([[1190,405],[1435,405],[1445,585],[1185,585]]); // 自販機・ゴミ箱
       P([[0,0],[150,0],[170,420],[145,620],[0,650]]);
       P([[1460,0],[1536,0],[1536,650],[1460,620]]);
+      // 店舗の裏・空・山（駐車場より奥へは入れない）
+      P([[150,0],[1460,0],[1460,505],[150,505]]);
     }
   }
 
@@ -978,8 +1003,10 @@ for(const race of usableRaces){
     const speed=this.getRaceData(this.playerRace).moveSpeed;
     const step=speed*delta/1000;
     const nx=Phaser.Math.Clamp(this.me.x+dx*step,16,1520),ny=Phaser.Math.Clamp(this.me.y+dy*step,80,848);
-    if(!this.isBlocked(nx,this.me.y))this.me.x=nx;
-    if(!this.isBlocked(this.me.x,ny))this.me.y=ny;
+    // 保存位置や当たり判定の変更で障害物の中にいる場合は、外へ出られるよう移動を許可する。
+    const stuck=this.isBlocked(this.me.x,this.me.y);
+    if(stuck || !this.isBlocked(nx,this.me.y))this.me.x=nx;
+    if(stuck || !this.isBlocked(this.me.x,ny))this.me.y=ny;
   }
 
   private placeRemote(c:Phaser.GameObjects.Container,x:number,y:number) {
@@ -1511,9 +1538,9 @@ for(const race of usableRaces){
 
   private updateMapTitle() {
     this.mapTitle?.setText(
-      this.currentMap==="yunagicho" ? "夕凪町　18:42　β 0.54" :
-      this.currentMap==="komorebi" ? "木漏れ日神社　β 0.54" :
-      "コンビニ　β 0.54"
+      this.currentMap==="yunagicho" ? "夕凪町　18:42　β 0.55" :
+      this.currentMap==="komorebi" ? "木漏れ日神社　β 0.55" :
+      "コンビニ　β 0.55"
     );
   }
 
