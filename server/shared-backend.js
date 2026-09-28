@@ -14,7 +14,7 @@ const client = enabled
     })
   : null;
 
-const ALLOWED_STATUS = new Set(["online", "studying", "reading", "busy", "afk"]);
+const ALLOWED_STATUS = new Set(["online", "studying", "reading", "working", "busy", "afk"]);
 
 function normalizeStatus(value) {
   return ALLOWED_STATUS.has(value) ? value : "online";
