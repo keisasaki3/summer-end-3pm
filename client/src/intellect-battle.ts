@@ -240,23 +240,37 @@ export function openQuestionBook() {
   const card=el("div","se-card");
   card.style.maxWidth="440px";
   const head=el("div","se-heading","図鑑");
+  // 図鑑の分類。今は学問クイズだけ中身がある（早押しクイズ・パズル・謎解きは今後）
+  const tabs=["学問クイズ","早押しクイズ","パズル","謎解き"];
+  const tabRow=el("div","se-book-tabs");
   const list=el("div","se-book-list");
-  if(entries.length===0) list.appendChild(el("div","se-message","まだ問題に出会っていない。"));
-  for(const e of entries){
-    const row=el("div","se-book-row");
-    row.append(
-      el("div","se-book-prompt",`${e.weak ? "【苦手】" : ""}${e.prompt}`),
-      el("div","se-book-answer",`答え ${e.answer}　解いた ${e.solved}回　間違えた ${e.wrong}回`),
-      el("div","se-book-explain",e.explain)
-    );
-    list.appendChild(row);
+  const show=(tab:string)=>{
+    [...tabRow.children].forEach(b=>(b as HTMLElement).classList.toggle("is-primary",(b as HTMLElement).textContent===tab));
+    const rows=tab==="学問クイズ" ? entries : [];
+    if(rows.length===0){ list.replaceChildren(el("div","se-message","まだ出会っていない。")); return; }
+    list.replaceChildren(...rows.map(e=>{
+      const row=el("div","se-book-row");
+      row.append(
+        el("div","se-book-prompt",`${e.weak ? "【苦手】" : ""}${e.prompt}`),
+        el("div","se-book-answer",`答え ${e.answer}　解いた ${e.solved}回　間違えた ${e.wrong}回`),
+        el("div","se-book-explain",e.explain)
+      );
+      return row;
+    }));
+  };
+  for(const t of tabs){
+    const b=el("button","se-btn",t);
+    b.type="button";
+    b.addEventListener("click",()=>show(t));
+    tabRow.appendChild(b);
   }
+  show(tabs[0]);
   const actions=el("div","se-actions");
   const closeBtn=el("button","se-btn is-primary","CLOSE");
   closeBtn.type="button";
   closeBtn.addEventListener("click",()=>overlay.remove());
   actions.appendChild(closeBtn);
-  card.append(head,list,actions);
+  card.append(head,tabRow,list,actions);
   overlay.appendChild(card);
   overlay.addEventListener("click",(ev)=>{ if(ev.target===overlay) overlay.remove(); });
   document.body.appendChild(overlay);
