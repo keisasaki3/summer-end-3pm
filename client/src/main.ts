@@ -1,5 +1,6 @@
 import Phaser from "phaser";
 import { GAME_TITLE } from "./branding";
+import { UI_THEMES, applyUiTheme, getUiTheme, type UiTheme, type UiThemeId } from "./ui-theme";
 import {
   ensureProfile,
   getCurrentSession,
@@ -61,16 +62,21 @@ class WalkScene extends Phaser.Scene {
   private positionUnsent = false;
   private replacedByNewerConnection = false;
 
-  private joystick = { active:false, pointerId:-1, originX:0, originY:0, dx:0, dy:0 };
+  // タッチ操作: どこでもドラッグで出るスティック / 短いタップでその場所へ歩く。
+  private joystick = { active:false, pointerId:-1, originX:0, originY:0, dx:0, dy:0, downAt:0, dragging:false };
+  private joystickBase?: Phaser.GameObjects.Arc;
+  private joystickKnob?: Phaser.GameObjects.Arc;
+  private moveTarget?: { x:number; y:number; lastProgressAt:number; lastDist:number };
+  private moveMarker?: Phaser.GameObjects.Arc;
   private chatInput?: HTMLInputElement;
   private chatLog?: HTMLDivElement;
-  private chatLines: string[] = [];
+  private chatLines: {name:string;text:string}[] = [];
   private coordHud?: HTMLDivElement;
   private coordsVisible = (
     localStorage.getItem("summer-end-3pm-show-coords") ??
     localStorage.getItem("nantoka-show-coords") ??
     localStorage.getItem("vw-show-coords") ??
-    "1"
+    "0"
   ) !== "0";
   private playerName = "WALKER";
   private playerColor = 0x60a5fa;
@@ -87,10 +93,11 @@ class WalkScene extends Phaser.Scene {
   private walkablePolygons: Phaser.Geom.Polygon[] = [];
   private currentMap: MapId = "yunagicho";
   private background?: Phaser.GameObjects.Image;
-  private mapTitle?: Phaser.GameObjects.Text;
+  private mapTitle?: HTMLDivElement;
   private transitionLock = false;
   private activeMapBgm?: Phaser.Sound.HTML5AudioSound;
   private activeMapAmbience: Phaser.Sound.HTML5AudioSound[] = [];
+  private uiTheme: UiTheme = getUiTheme();
   private masterVolume = Math.min(1, Math.max(0, Number(localStorage.getItem("summer-end-3pm-master-volume") ?? "1")));
 
   // 今後、環境音/BGMファイルを追加したらここへ key -> URL を登録する。
@@ -228,15 +235,12 @@ class WalkScene extends Phaser.Scene {
     void this.setupLogin();
     this.setupCollisionMap();
 
-    this.mapTitle = this.add.text(18, 18, "夕凪町　18:42　β 0.57", {
-      fontFamily: "serif", fontSize: "18px", color: "#fff4df",
-      backgroundColor: "#2b243088", padding: { x:10, y:7 }
-    }).setScrollFactor(0).setDepth(1000);
-
-    const hint = this.add.text(18, 58, "WASD / 矢印　・　スマホは左側をドラッグ", {
-      fontFamily: "sans-serif", fontSize: "13px", color: "#f8e8d0",
-      backgroundColor: "#2b243066", padding: { x:8, y:5 }
-    }).setScrollFactor(0).setDepth(1000);
+    this.mapTitle=document.createElement("div");
+    this.mapTitle.className="se-plate se-hud-title";
+    document.body.appendChild(this.mapTitle);
+    this.updateMapTitle();
+    void document.fonts?.load(`11px ${this.uiTheme.font}`).catch(()=>{});
+    document.fonts?.addEventListener?.("loadingdone",()=>this.refreshNameTags());
   }
 
   private makePlayer(
@@ -261,9 +265,9 @@ class WalkScene extends Phaser.Scene {
     visual.setScale(height);
 
     const name=this.add.text(0,-88*height,this.playerLabel(label,status),{
-      fontFamily:"sans-serif",fontSize:"11px",color:"#f8ead8",
-      backgroundColor:"#29232d88",padding:{x:4,y:2}
-    }).setOrigin(.5);
+      fontFamily:this.uiTheme.font,fontSize:"11px",color:this.uiTheme.nameFg,
+      backgroundColor:this.uiTheme.nameBg,padding:{x:7,y:3}
+    }).setOrigin(.5).setResolution(2);
 
     const c=this.add.container(x,y,[visual,name]).setDepth(10);
     c.setData("visual",visual);
@@ -367,17 +371,26 @@ class WalkScene extends Phaser.Scene {
     if (!safe) return;
 
     const h = Number(c.getData("height") || 1);
-    const label = this.add.text(0, -78*h, safe, {
-      fontFamily: "sans-serif",
+    const label = this.add.text(0, -106*h, safe, {
+      fontFamily: this.uiTheme.font,
       fontSize: "14px",
-      color: "#242027",
-      backgroundColor: "#fffaf0",
-      padding: { x: 8, y: 5 },
-      wordWrap: { width: 960, useAdvancedWrap: true },
+      color: this.uiTheme.bubbleFg,
+      padding: { x: 11, y: 7 },
+      wordWrap: { width: 220, useAdvancedWrap: true },
       align: "center"
-    }).setOrigin(0.5, 1);
+    }).setOrigin(0.5, 1).setResolution(2);
 
-    const bubble = this.add.container(0, 0, [label]);
+    // 角丸の吹き出し＋しっぽ
+    const bw = label.width, bh = label.height, top = label.y - bh;
+    const t = this.uiTheme, r = t.bubbleRadius;
+    const bg = this.add.graphics();
+    bg.fillStyle(0x000000, .18).fillRoundedRect(-bw/2 + 2, top + 3, bw, bh, r);
+    bg.fillStyle(t.bubbleBg, .97).fillRoundedRect(-bw/2, top, bw, bh, r);
+    bg.lineStyle(1.5, t.bubbleStroke, 1).strokeRoundedRect(-bw/2, top, bw, bh, r);
+    bg.fillStyle(t.bubbleBg, .97).fillTriangle(-6, label.y - 1, 6, label.y - 1, 0, label.y + 7);
+    bg.lineStyle(1.5, t.bubbleStroke, 1).lineBetween(-6, label.y, 0, label.y + 7).lineBetween(6, label.y, 0, label.y + 7);
+
+    const bubble = this.add.container(0, 0, [bg, label]);
     c.add(bubble);
     c.setData("bubble", bubble);
 
@@ -394,40 +407,26 @@ class WalkScene extends Phaser.Scene {
     if (this.input.keyboard) this.input.keyboard.enabled = false;
 
     const overlay = document.createElement("div");
-    Object.assign(overlay.style, {
-      position:"fixed", inset:"0", zIndex:"20000",
-      display:"flex", alignItems:"center", justifyContent:"center",
-      background:"rgba(20,18,24,.92)", fontFamily:"sans-serif"
-    } as Partial<CSSStyleDeclaration>);
+    overlay.className="se-overlay";
+    overlay.style.zIndex="20000";
 
     const panel = document.createElement("div");
-    Object.assign(panel.style, {
-      width:"min(440px, calc(100vw - 32px))",
-      padding:"24px", borderRadius:"16px",
-      background:"#2d2933", color:"#fff8e8",
-      boxShadow:"0 18px 50px rgba(0,0,0,.35)"
-    } as Partial<CSSStyleDeclaration>);
+    panel.className="se-card";
 
     const brand=document.createElement("div");
+    brand.className="se-brand";
     brand.textContent=GAME_TITLE;
-    Object.assign(brand.style,{
-      fontSize:"16px",fontWeight:"600",letterSpacing:".08em",opacity:".78",marginBottom:"7px"
-    } as Partial<CSSStyleDeclaration>);
 
     const title = document.createElement("div");
+    title.className="se-title";
     title.textContent = "夕凪町へ";
-    Object.assign(title.style, {
-      fontSize:"26px", fontWeight:"700", marginBottom:"18px"
-    } as Partial<CSSStyleDeclaration>);
 
     const message=document.createElement("div");
-    Object.assign(message.style,{
-      minHeight:"20px",fontSize:"13px",lineHeight:"1.5",opacity:".82",marginBottom:"14px"
-    } as Partial<CSSStyleDeclaration>);
+    message.className="se-message";
 
     const setMessage=(text:string,error=false)=>{
       message.textContent=text;
-      message.style.color=error ? "#ffb7b7" : "#fff0cf";
+      message.classList.toggle("is-error",error);
     };
 
     panel.append(brand,title,message);
@@ -521,28 +520,18 @@ class WalkScene extends Phaser.Scene {
     password.placeholder="パスワード";
     password.autocomplete="current-password";
 
-    for(const input of [email,password]){
-      Object.assign(input.style,{
-        width:"100%",height:"42px",boxSizing:"border-box",marginBottom:"10px",borderRadius:"10px",
-        border:"1px solid rgba(255,255,255,.2)",background:"#211e27",color:"#fff",padding:"0 12px",
-        fontSize:"15px",outline:"none"
-      } as Partial<CSSStyleDeclaration>);
-    }
+    for(const input of [email,password]) input.className="se-field";
 
     const row=document.createElement("div");
-    Object.assign(row.style,{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"8px",marginBottom:"10px"} as Partial<CSSStyleDeclaration>);
+    row.className="se-row";
     const login=document.createElement("button");
     login.type="button";
     login.textContent="ログイン";
     const signup=document.createElement("button");
     signup.type="button";
     signup.textContent="新規登録";
-    for(const button of [login,signup]){
-      Object.assign(button.style,{
-        height:"42px",borderRadius:"10px",border:"1px solid rgba(255,255,255,.2)",
-        background:"#f2e7c8",color:"#242027",fontWeight:"700",cursor:"pointer"
-      } as Partial<CSSStyleDeclaration>);
-    }
+    login.className="se-btn is-primary";
+    signup.className="se-btn";
     row.append(login,signup);
 
     const google=document.createElement("button");
@@ -552,11 +541,7 @@ class WalkScene extends Phaser.Scene {
     const googleLabel=document.createElement("span");
     googleLabel.textContent="Googleでログイン";
     google.appendChild(googleLabel);
-    Object.assign(google.style,{
-      display:"flex",alignItems:"center",justifyContent:"center",gap:"10px",
-      width:"100%",height:"44px",borderRadius:"10px",border:"1px solid rgba(255,255,255,.25)",
-      background:"#211e27",color:"#fff8e8",fontWeight:"700",cursor:"pointer"
-    } as Partial<CSSStyleDeclaration>);
+    google.className="se-btn";
 
     const setDisabled=(value:boolean)=>{
       login.disabled=value;signup.disabled=value;google.disabled=value;
@@ -617,51 +602,43 @@ class WalkScene extends Phaser.Scene {
     wrap.dataset.loginStep="profile";
 
     const nameLabel=document.createElement("label");
+    nameLabel.className="se-label";
     nameLabel.textContent="表示名";
-    nameLabel.style.display="block";
-    nameLabel.style.marginBottom="6px";
     const nameInput=document.createElement("input");
     nameInput.type="text";
     nameInput.maxLength=20;
     nameInput.value=profile.display_name;
-    Object.assign(nameInput.style,{
-      width:"100%",height:"42px",boxSizing:"border-box",marginBottom:"16px",borderRadius:"10px",
-      border:"1px solid rgba(255,255,255,.2)",background:"#211e27",color:"#fff",padding:"0 12px",fontSize:"16px"
-    } as Partial<CSSStyleDeclaration>);
+    nameInput.className="se-field";
 
     const usableRaces=races.filter((race)=>this.supportedSpriteRaces.has(race.race_id));
     const storedRace=usableRaces.find((race)=>race.race_id===profile.race_id) ?? null;
     let selectedRace=storedRace?.race_id ?? "";
 
     const raceLabel=document.createElement("div");
+    raceLabel.className="se-label";
     raceLabel.textContent="種族";
-    raceLabel.style.marginBottom="8px";
     const raceArea=document.createElement("div");
-    raceArea.style.marginBottom="16px";
+    raceArea.className="se-races";
 
-    Object.assign(raceArea.style,{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:"8px"} as Partial<CSSStyleDeclaration>);
 const raceButtons:HTMLButtonElement[]=[];
 for(const race of usableRaces){
   const button=document.createElement("button");
   button.type="button";
   button.textContent=race.name_ja;
-  Object.assign(button.style,{
-    minHeight:"48px",borderRadius:"10px",background:"#211e27",color:"#fff8e8",fontSize:"13px",
-    fontWeight:"700",cursor:"pointer",border:selectedRace===race.race_id ? "2px solid #fff" : "2px solid rgba(255,255,255,.15)"
-  } as Partial<CSSStyleDeclaration>);
+  button.className="se-chip";
+  button.classList.toggle("is-selected",selectedRace===race.race_id);
   button.onclick=()=>{
     selectedRace=race.race_id;
-    raceButtons.forEach((item)=>item.style.border="2px solid rgba(255,255,255,.15)");
-    button.style.border="2px solid #fff";
+    raceButtons.forEach((item)=>item.classList.remove("is-selected"));
+    button.classList.add("is-selected");
   };
   raceButtons.push(button);
   raceArea.appendChild(button);
 }
 
     const statusLabel=document.createElement("label");
+    statusLabel.className="se-label";
     statusLabel.textContent="ステータス";
-    statusLabel.style.display="block";
-    statusLabel.style.marginBottom="6px";
     const status=document.createElement("select");
     for(const [value,label] of [["online","オンライン"],["studying","勉強中"],["reading","読書中"],["busy","取り込み中"],["afk","AFK"]] as const){
       const option=document.createElement("option");
@@ -670,18 +647,13 @@ for(const race of usableRaces){
       option.selected=value===presence;
       status.appendChild(option);
     }
-    Object.assign(status.style,{
-      width:"100%",height:"42px",boxSizing:"border-box",marginBottom:"18px",borderRadius:"10px",
-      border:"1px solid rgba(255,255,255,.2)",background:"#211e27",color:"#fff",padding:"0 10px"
-    } as Partial<CSSStyleDeclaration>);
+    status.className="se-field";
+    status.style.marginBottom="20px";
 
     const start=document.createElement("button");
     start.type="button";
     start.textContent="散歩をはじめる";
-    Object.assign(start.style,{
-      width:"100%",height:"46px",border:"0",borderRadius:"12px",background:"#f2e7c8",color:"#242027",
-      fontSize:"16px",fontWeight:"700",cursor:"pointer"
-    } as Partial<CSSStyleDeclaration>);
+    start.className="se-btn is-primary";
     start.onclick=()=>void(async()=>{
       try{
         if(!selectedRace)throw new Error("種族を選択してください。");
@@ -708,10 +680,7 @@ for(const race of usableRaces){
     const name=document.createElement("input");
     name.placeholder="名前";
     name.maxLength=16;
-    Object.assign(name.style,{
-      width:"100%",height:"42px",boxSizing:"border-box",marginBottom:"12px",borderRadius:"10px",
-      background:"#211e27",color:"#fff",border:"1px solid #ffffff33",padding:"0 12px"
-    } as Partial<CSSStyleDeclaration>);
+    name.className="se-field";
 
     const race=document.createElement("select");
     for(const [value,label] of [["teddy","テディぐま"],["ancient-robot","いにしえロボット"],["rabbit-jk","うさぎjk"]]){
@@ -720,17 +689,13 @@ for(const race of usableRaces){
       option.textContent=label;
       race.appendChild(option);
     }
-    Object.assign(race.style,{
-      width:"100%",height:"42px",boxSizing:"border-box",marginBottom:"16px",borderRadius:"10px",
-      background:"#211e27",color:"#fff",border:"1px solid #ffffff33",padding:"0 10px"
-    } as Partial<CSSStyleDeclaration>);
+    race.className="se-field";
+    race.style.marginBottom="20px";
 
     const start=document.createElement("button");
     start.type="button";
     start.textContent="散歩をはじめる";
-    Object.assign(start.style,{
-      width:"100%",height:"46px",border:"0",borderRadius:"12px",background:"#f2e7c8",fontWeight:"700",cursor:"pointer"
-    } as Partial<CSSStyleDeclaration>);
+    start.className="se-btn is-primary";
     const begin=()=>{
       this.playerName=name.value.trim()||"WALKER";
       this.playerRace=race.value;
@@ -749,15 +714,7 @@ for(const race of usableRaces){
 
   private setupChatLog() {
     const log=document.createElement("div");
-    Object.assign(log.style,{
-      position:"fixed",left:"18px",bottom:"76px",zIndex:"9998",
-      width:"min(430px, calc(100vw - 36px))",minHeight:"58px",maxHeight:"142px",
-      overflow:"hidden",boxSizing:"border-box",padding:"9px 12px",
-      borderRadius:"8px",background:"rgba(13,16,22,.42)",
-      color:"rgba(255,248,235,.88)",font:"13px/1.55 system-ui,sans-serif",
-      textShadow:"0 1px 2px rgba(0,0,0,.65)",pointerEvents:"none",
-      transition:"background .16s ease, opacity .16s ease",opacity:".86"
-    } as Partial<CSSStyleDeclaration>);
+    log.className="se-plate se-chatlog";
     document.body.appendChild(log);
     this.chatLog=log;
     this.renderChatLog();
@@ -767,7 +724,7 @@ for(const race of usableRaces){
     const cleanName=String(name||"WALKER").slice(0,20);
     const cleanText=String(text||"").slice(0,80);
     if(!cleanText)return;
-    this.chatLines.push(`${cleanName}：${cleanText}`);
+    this.chatLines.push({name:cleanName,text:cleanText});
     if(this.chatLines.length>30)this.chatLines.splice(0,this.chatLines.length-30);
     this.renderChatLog();
   }
@@ -778,7 +735,10 @@ for(const race of usableRaces){
     const visible=this.chatLines.slice(-6);
     for(const line of visible){
       const row=document.createElement("div");
-      row.textContent=line;
+      const who=document.createElement("span");
+      who.className="se-chat-name";
+      who.textContent=line.name;
+      row.append(who,document.createTextNode(line.text));
       row.style.whiteSpace="pre-wrap";
       row.style.overflowWrap="anywhere";
       this.chatLog.appendChild(row);
@@ -793,26 +753,10 @@ for(const race of usableRaces){
     input.maxLength = 80;
     input.placeholder = "Speak into the evening...";
     input.autocomplete = "off";
-    Object.assign(input.style, {
-      position: "fixed",
-      left: "50%",
-      bottom: "18px",
-      transform: "translateX(-50%)",
-      width: "min(520px, calc(100vw - 28px))",
-      height: "44px",
-      boxSizing: "border-box",
-      border: "1px solid rgba(255,255,255,.35)",
-      borderRadius: "12px",
-      background: "rgba(34,29,38,.88)",
-      color: "#fff7e8",
-      fontSize: "16px",
-      padding: "0 14px",
-      outline: "none",
-      zIndex: "10000"
-    } as Partial<CSSStyleDeclaration>);
+    input.className = "se-plate se-chat-input";
 
     const disableGameKeys = () => {
-      if(this.chatLog){this.chatLog.style.background="rgba(13,16,22,.68)";this.chatLog.style.opacity="1";}
+      this.chatLog?.classList.add("is-active");
       if (this.input.keyboard) {
         this.input.keyboard.resetKeys();
         this.input.keyboard.enabled = false;
@@ -820,10 +764,12 @@ for(const race of usableRaces){
       this.joystick.active = false;
       this.joystick.dx = 0;
       this.joystick.dy = 0;
+      this.hideJoystick();
+      this.clearMoveTarget();
     };
 
     const enableGameKeys = () => {
-      if(this.chatLog){this.chatLog.style.background="rgba(13,16,22,.42)";this.chatLog.style.opacity=".86";}
+      this.chatLog?.classList.remove("is-active");
       if (this.input.keyboard) {
         this.input.keyboard.resetKeys();
         this.input.keyboard.enabled = true;
@@ -1282,24 +1228,18 @@ for(const race of usableRaces){
 
   private showReplacedNotice() {
     const overlay=document.createElement("div");
-    Object.assign(overlay.style,{
-      position:"fixed",inset:"0",zIndex:"20000",display:"flex",alignItems:"center",justifyContent:"center",
-      background:"rgba(20,18,24,.86)",fontFamily:"sans-serif"
-    } as Partial<CSSStyleDeclaration>);
+    overlay.className="se-overlay";
+    overlay.style.zIndex="20000";
     const box=document.createElement("div");
-    Object.assign(box.style,{
-      width:"min(360px, calc(100vw - 32px))",padding:"22px",borderRadius:"14px",
-      background:"#2d2933",color:"#fff8e8",textAlign:"center",lineHeight:"1.6"
-    } as Partial<CSSStyleDeclaration>);
+    box.className="se-card";
+    Object.assign(box.style,{textAlign:"center",lineHeight:"1.7"} as Partial<CSSStyleDeclaration>);
     const text=document.createElement("div");
     text.textContent="別の画面で同じアカウントが接続したため、この画面は切断されました。";
     const button=document.createElement("button");
     button.type="button";
     button.textContent="この画面で再接続";
-    Object.assign(button.style,{
-      marginTop:"16px",width:"100%",height:"44px",border:"0",borderRadius:"10px",
-      background:"#f2e7c8",color:"#242027",fontWeight:"700",cursor:"pointer"
-    } as Partial<CSSStyleDeclaration>);
+    button.className="se-btn is-primary";
+    button.style.marginTop="18px";
     button.onclick=()=>{
       overlay.remove();
       this.replacedByNewerConnection=false;
@@ -1342,47 +1282,56 @@ for(const race of usableRaces){
 
   private setupOptions() {
     const coordHud=document.createElement("div");
-    Object.assign(coordHud.style,{position:"fixed",right:"14px",top:"64px",zIndex:"29",
-      padding:"5px 8px",borderRadius:"6px",background:"rgba(10,12,16,.58)",
-      color:"rgba(255,255,255,.9)",font:"12px/1.2 monospace",pointerEvents:"none"});
+    coordHud.className="se-plate se-coord";
     document.body.appendChild(coordHud);
     this.coordHud=coordHud;
     coordHud.style.display=this.coordsVisible ? "block" : "none";
 
     const button=document.createElement("button");
-    button.textContent="⚙";
+    button.type="button";
     button.title="Options";
-    Object.assign(button.style,{position:"fixed",right:"14px",top:"14px",zIndex:"30",
-      width:"42px",height:"42px",fontSize:"21px",border:"1px solid #ffffff66",
-      borderRadius:"8px",background:"#161616cc",color:"#fff",cursor:"pointer"});
+    button.className="se-plate se-icon-btn";
+    button.innerHTML='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>';
     document.body.appendChild(button);
 
     const panel=document.createElement("div");
-    Object.assign(panel.style,{display:"none",position:"fixed",inset:"0",zIndex:"40",
-      background:"#0008",alignItems:"center",justifyContent:"center"});
+    panel.className="se-overlay";
+    Object.assign(panel.style,{display:"none",zIndex:"15000"});
     const box=document.createElement("div");
-    Object.assign(box.style,{
-      width:"min(360px,86vw)",background:"#181818",color:"white",padding:"24px",
-      border:"1px solid #ffffff33",borderRadius:"10px",fontFamily:"system-ui"
-    } as Partial<CSSStyleDeclaration>);
+    box.className="se-card";
     const heading=document.createElement("div");
+    heading.className="se-heading";
     heading.textContent="OPTIONS";
-    Object.assign(heading.style,{fontSize:"20px",fontWeight:"700",marginBottom:"22px"});
 
     const coordsLabel=document.createElement("label");
-    Object.assign(coordsLabel.style,{display:"flex",alignItems:"center",gap:"9px",cursor:"pointer"});
+    coordsLabel.className="se-toggle";
     const coords=document.createElement("input");
     coords.type="checkbox";
-    const coordsText=document.createTextNode("座標を表示");
-    coordsLabel.append(coords,coordsText);
-    box.append(heading,coordsLabel);
+    const coordsText=document.createElement("span");
+    coordsText.textContent="座標を表示";
+    coordsLabel.append(coordsText,coords);
+
+    const themeLabel=document.createElement("label");
+    themeLabel.className="se-label";
+    themeLabel.textContent="デザイン";
+    themeLabel.style.marginTop="14px";
+    const themeSelect=document.createElement("select");
+    themeSelect.className="se-field";
+    themeSelect.style.marginBottom="0";
+    for(const theme of UI_THEMES){
+      const option=document.createElement("option");
+      option.value=theme.id;option.textContent=`${theme.id}　${theme.label}`;themeSelect.appendChild(option);
+    }
+    themeSelect.value=this.uiTheme.id;
+    themeSelect.addEventListener("change",()=>this.setUiTheme(themeSelect.value as UiThemeId));
+    box.append(heading,themeLabel,themeSelect,coordsLabel);
 
     const volumeLabel=document.createElement("label");
-    Object.assign(volumeLabel.style,{display:"block",marginTop:"18px",marginBottom:"6px"} as Partial<CSSStyleDeclaration>);
+    volumeLabel.className="se-volume-head";
     const volumeText=document.createElement("span");
     const volumeValue=document.createElement("span");
     volumeText.textContent="音量";
-    volumeValue.textContent=` ${Math.round(this.masterVolume*100)}%`;
+    volumeValue.textContent=`${Math.round(this.masterVolume*100)}%`;
     volumeLabel.append(volumeText,volumeValue);
     const volume=document.createElement("input");
     volume.type="range";
@@ -1390,10 +1339,10 @@ for(const race of usableRaces){
     volume.max="100";
     volume.step="1";
     volume.value=String(Math.round(this.masterVolume*100));
-    Object.assign(volume.style,{width:"100%",margin:"0 0 2px"} as Partial<CSSStyleDeclaration>);
+    volume.className="se-range";
     volume.addEventListener("input",()=>{
       this.masterVolume=Math.min(1,Math.max(0,Number(volume.value)/100));
-      volumeValue.textContent=` ${Math.round(this.masterVolume*100)}%`;
+      volumeValue.textContent=`${Math.round(this.masterVolume*100)}%`;
       localStorage.setItem("summer-end-3pm-master-volume",String(this.masterVolume));
       this.activeMapBgm?.setVolume(this.masterVolume);
       for(const sound of this.activeMapAmbience) sound.setVolume(this.masterVolume);
@@ -1403,19 +1352,16 @@ for(const race of usableRaces){
     let statusSelect:HTMLSelectElement|undefined;
     if(sharedBackendEnabled && this.authUserId){
       const statusLabel=document.createElement("label");
+      statusLabel.className="se-label";
       statusLabel.textContent="ステータス";
-      statusLabel.style.display="block";
-      statusLabel.style.marginTop="18px";
-      statusLabel.style.marginBottom="6px";
+      statusLabel.style.marginTop="20px";
       statusSelect=document.createElement("select");
       for(const [value,label] of [["online","オンライン"],["studying","勉強中"],["reading","読書中"],["busy","取り込み中"],["afk","AFK"]] as const){
         const option=document.createElement("option");
         option.value=value;option.textContent=label;statusSelect.appendChild(option);
       }
-      Object.assign(statusSelect.style,{
-        width:"100%",height:"40px",boxSizing:"border-box",borderRadius:"8px",
-        background:"#242424",color:"#fff",border:"1px solid #ffffff33",padding:"0 8px"
-      } as Partial<CSSStyleDeclaration>);
+      statusSelect.className="se-field";
+      statusSelect.style.marginBottom="0";
       statusSelect.value=this.presenceStatus;
       statusSelect.addEventListener("change",()=>{
         const next=this.normalizeStatus(statusSelect?.value);
@@ -1429,7 +1375,7 @@ for(const race of usableRaces){
     }
 
     const credits=document.createElement("div");
-    Object.assign(credits.style,{marginTop:"18px",paddingTop:"14px",borderTop:"1px solid #ffffff22",fontSize:"11px",lineHeight:"1.5",opacity:".72"} as Partial<CSSStyleDeclaration>);
+    credits.className="se-credits";
     const creditTitle=document.createElement("div");
     creditTitle.textContent="BGM: Night Ambience — cclaretc (Freesound) / Pixabay";
     const creditLink=document.createElement("a");
@@ -1437,7 +1383,6 @@ for(const race of usableRaces){
     creditLink.target="_blank";
     creditLink.rel="noopener noreferrer";
     creditLink.textContent="Pixabay";
-    Object.assign(creditLink.style,{color:"#fff",opacity:".9"} as Partial<CSSStyleDeclaration>);
     const yunagiCreditTitle=document.createElement("div");
     yunagiCreditTitle.style.marginTop="8px";
     yunagiCreditTitle.textContent="BGM: Perves Ambient Mountains Distant Small Village — jordir / Freesound";
@@ -1446,7 +1391,6 @@ for(const race of usableRaces){
     yunagiCreditLink.target="_blank";
     yunagiCreditLink.rel="noopener noreferrer";
     yunagiCreditLink.textContent="Freesound";
-    Object.assign(yunagiCreditLink.style,{color:"#fff",opacity:".9"} as Partial<CSSStyleDeclaration>);
     const komorebiCreditTitle=document.createElement("div");
     komorebiCreditTitle.style.marginTop="8px";
     komorebiCreditTitle.textContent="BGM: Cicadas + Birds — kvgarlic / Freesound";
@@ -1455,21 +1399,22 @@ for(const race of usableRaces){
     komorebiCreditLink.target="_blank";
     komorebiCreditLink.rel="noopener noreferrer";
     komorebiCreditLink.textContent="Freesound";
-    Object.assign(komorebiCreditLink.style,{color:"#fff",opacity:".9"} as Partial<CSSStyleDeclaration>);
     credits.append(creditTitle,creditLink,yunagiCreditTitle,yunagiCreditLink,komorebiCreditTitle,komorebiCreditLink);
     box.appendChild(credits);
 
     const actions=document.createElement("div");
-    Object.assign(actions.style,{display:"flex",gap:"10px",marginTop:"20px"});
+    actions.className="se-actions";
     const closeButton=document.createElement("button");
     closeButton.textContent="CLOSE";
-    Object.assign(closeButton.style,{flex:"1",padding:"10px"});
+    closeButton.type="button";
+    closeButton.className="se-btn is-primary";
     actions.appendChild(closeButton);
 
     if(sharedBackendEnabled && this.authUserId){
       const logout=document.createElement("button");
       logout.textContent="LOGOUT";
-      Object.assign(logout.style,{flex:"1",padding:"10px"});
+      logout.type="button";
+      logout.className="se-btn";
       logout.addEventListener("click",()=>void(async()=>{
         logout.disabled=true;
         this.loginOpen=true;
@@ -1506,6 +1451,7 @@ for(const race of usableRaces){
     document.body.appendChild(panel);
 
     const sync=()=>{
+      themeSelect.value=this.uiTheme.id;
       coords.checked=this.coordsVisible;
       if(statusSelect)statusSelect.value=this.presenceStatus;
     };
@@ -1520,12 +1466,30 @@ for(const race of usableRaces){
     panel.addEventListener("click",(event)=>{if(event.target===panel)close();});
   }
 
+  private setUiTheme(id:UiThemeId) {
+    this.uiTheme=applyUiTheme(id);
+    this.refreshNameTags();
+    // Webフォントの読み込みが終わったら、キャンバス上の名札を描き直す。
+    void document.fonts?.load(`11px ${this.uiTheme.font}`).then(()=>this.refreshNameTags()).catch(()=>{});
+  }
+
+  private refreshNameTags() {
+    const players=[this.me,...this.others.values()].filter(Boolean) as Phaser.GameObjects.Container[];
+    for(const c of players){
+      const nameText=c.getData("nameText") as Phaser.GameObjects.Text | undefined;
+      nameText?.setStyle({fontFamily:this.uiTheme.font,color:this.uiTheme.nameFg,backgroundColor:this.uiTheme.nameBg});
+    }
+  }
+
   private updateMapTitle() {
-    this.mapTitle?.setText(
-      this.currentMap==="yunagicho" ? "夕凪町　18:42　β 0.57" :
-      this.currentMap==="komorebi" ? "木漏れ日神社　β 0.57" :
-      "コンビニ　β 0.57"
-    );
+    if(!this.mapTitle)return;
+    const name=document.createElement("div");
+    name.className="se-hud-name";
+    name.textContent=this.mapData[this.currentMap].name;
+    const sub=document.createElement("div");
+    sub.className="se-hud-sub";
+    sub.textContent=this.currentMap==="yunagicho" ? "18:42 · β 0.58" : "β 0.58";
+    this.mapTitle.replaceChildren(name,sub);
   }
 
   private setupImageField() {
@@ -1537,6 +1501,7 @@ for(const race of usableRaces){
   private switchMap(map:MapId, x:number, y:number) {
     if(this.transitionLock || !this.me) return;
     this.transitionLock=true;
+    this.clearMoveTarget();
     this.currentMap=map;
     const data=this.mapData[map];
     this.background?.setTexture(data.texture);
@@ -1583,22 +1548,58 @@ for(const race of usableRaces){
   }
 
   private setupTouchControls(){
+    const R=52, DRAG_START=10;
+    this.joystickBase=this.add.circle(0,0,R,0x000000,.22).setStrokeStyle(2,0xffffff,.55).setScrollFactor(0).setDepth(3000).setVisible(false);
+    this.joystickKnob=this.add.circle(0,0,22,0xffffff,.7).setScrollFactor(0).setDepth(3001).setVisible(false);
+    this.moveMarker=this.add.circle(0,0,9,0xffffff,0).setStrokeStyle(2,0xffffff,.9).setDepth(5).setVisible(false);
+    this.input.addPointer(1);
+
     this.input.on("pointerdown",(p:Phaser.Input.Pointer)=>{
-      if(p.x>this.scale.width*.65)return;
-      Object.assign(this.joystick,{active:true,pointerId:p.id,originX:p.x,originY:p.y,dx:0,dy:0});
+      if(this.loginOpen || this.joystick.active)return;
+      Object.assign(this.joystick,{active:true,pointerId:p.id,originX:p.x,originY:p.y,dx:0,dy:0,downAt:performance.now(),dragging:false});
     });
     this.input.on("pointermove",(p:Phaser.Input.Pointer)=>{
       if(!this.joystick.active||p.id!==this.joystick.pointerId)return;
-      const dx=p.x-this.joystick.originX,dy=p.y-this.joystick.originY,len=Math.hypot(dx,dy)||1,max=58,s=Math.min(1,max/len);
-      this.joystick.dx=dx*s/max;this.joystick.dy=dy*s/max;
+      const ox=p.x-this.joystick.originX, oy=p.y-this.joystick.originY, len=Math.hypot(ox,oy);
+      if(!this.joystick.dragging){
+        if(len<DRAG_START)return;
+        this.joystick.dragging=true;
+        this.clearMoveTarget();
+        this.joystickBase?.setPosition(this.joystick.originX,this.joystick.originY).setVisible(true);
+        this.joystickKnob?.setVisible(true);
+      }
+      const s=Math.min(1,R/(len||1));
+      this.joystickKnob?.setPosition(this.joystick.originX+ox*s,this.joystick.originY+oy*s);
+      // 小さな遊びを入れて、指のブレで向きが変わりすぎないようにする。
+      const mag=Math.min(1,len/R);
+      if(mag<.18){this.joystick.dx=0;this.joystick.dy=0;return;}
+      this.joystick.dx=ox/(len||1);this.joystick.dy=oy/(len||1);
     });
     const release=(p:Phaser.Input.Pointer)=>{
-      if(p.id!==this.joystick.pointerId)return;
-      this.joystick.active=false;this.joystick.dx=0;this.joystick.dy=0;
+      if(!this.joystick.active||p.id!==this.joystick.pointerId)return;
+      const tapped=!this.joystick.dragging && performance.now()-this.joystick.downAt<350;
+      this.joystick.active=false;this.joystick.dx=0;this.joystick.dy=0;this.joystick.dragging=false;
+      this.hideJoystick();
+      if(tapped && this.me && !this.loginOpen) this.setMoveTarget(p.worldX,p.worldY);
     };
     this.input.on("pointerup",release);this.input.on("pointerupoutside",release);
   }
 
+  private hideJoystick(){
+    this.joystickBase?.setVisible(false);
+    this.joystickKnob?.setVisible(false);
+  }
+
+  private setMoveTarget(x:number,y:number){
+    const tx=Phaser.Math.Clamp(x,16,1520), ty=Phaser.Math.Clamp(y,80,848);
+    this.moveTarget={x:tx,y:ty,lastProgressAt:performance.now(),lastDist:Infinity};
+    this.moveMarker?.setPosition(tx,ty).setVisible(true).setAlpha(1).setScale(1);
+  }
+
+  private clearMoveTarget(){
+    this.moveTarget=undefined;
+    this.moveMarker?.setVisible(false);
+  }
 
   private isDomEditing() {
     const el=document.activeElement as HTMLElement | null;
@@ -1648,6 +1649,22 @@ for(const race of usableRaces){
       if(this.cursors?.down.isDown||this.keys?.S?.isDown)dy++;
       dx+=this.joystick.dx;
       dy+=this.joystick.dy;
+      if(dx!==0 || dy!==0) this.clearMoveTarget();
+      else if(this.moveTarget){
+        // タップした場所へ歩く。着いたら止まり、壁などで進めなくなったら諦める。
+        const tx=this.moveTarget.x-this.me.x, ty=this.moveTarget.y-this.me.y, dist=Math.hypot(tx,ty);
+        const now=performance.now();
+        if(dist<6) this.clearMoveTarget();
+        else{
+          if(dist<this.moveTarget.lastDist-1){this.moveTarget.lastDist=dist;this.moveTarget.lastProgressAt=now;}
+          if(now-this.moveTarget.lastProgressAt>400) this.clearMoveTarget();
+          else{dx=tx/dist;dy=ty/dist;}
+        }
+      }
+    }
+    if(this.moveMarker?.visible){
+      const pulse=(Math.sin(time/160)+1)/2;
+      this.moveMarker.setScale(.85+pulse*.3).setAlpha(.6+pulse*.4);
     }
 
     const len=Math.hypot(dx,dy),moving=len>0;

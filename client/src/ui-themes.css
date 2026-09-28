@@ -1,0 +1,169 @@
+/* ===== UIデザイン（β0.58）: 8種から選択。<html data-theme="A"> で切り替える ===== */
+
+/* ---------- 共通（配置と変数の使い方） ---------- */
+:root{
+  --font-ui:"Klee One",serif;--font-title:"Shippori Mincho",serif;
+  --fg:#3b2a22;--muted:#7a6456;--accent:#8a3b1e;--line:#6b4a3a55;
+  --p-bg:#f6efe2;--p-fg:#3b2a22;--p-border:1px solid #6b4a3a;--p-radius:2px;--p-shadow:2px 2px 0 #6b4a3a33;
+  --c-bg:#f6efe2;--c-border:1px solid #6b4a3a;--c-radius:2px;--c-shadow:0 14px 34px rgba(0,0,0,.45);
+  --f-bg:#fffaf0;--f-border:1px solid #6b4a3a88;--f-radius:2px;
+  --b-bg:transparent;--b-fg:#3b2a22;--b-border:1px solid #6b4a3a;--b-radius:2px;
+  --bp-bg:#6b4a3a;--bp-fg:#f6efe2;--bp-border:1px solid #6b4a3a;
+  --dim:rgba(40,25,20,.5);
+}
+.se-plate{background:var(--p-bg);color:var(--p-fg);border:var(--p-border);border-radius:var(--p-radius);box-shadow:var(--p-shadow);font-family:var(--font-ui)}
+.se-hud-title{position:fixed;left:14px;top:14px;z-index:28;padding:7px 14px 8px;pointer-events:none}
+.se-hud-title .se-hud-name{font-family:var(--font-title);font-size:19px;letter-spacing:.12em;line-height:1.25}
+.se-hud-title .se-hud-sub{font-size:11px;letter-spacing:.12em;opacity:.8;margin-top:2px}
+.se-icon-btn{position:fixed;right:14px;top:14px;z-index:30;width:42px;height:42px;padding:0;display:flex;align-items:center;justify-content:center;cursor:pointer}
+.se-icon-btn:active{transform:scale(.94)}
+.se-icon-btn svg{width:21px;height:21px}
+.se-coord{position:fixed;right:14px;top:66px;z-index:29;padding:4px 9px;font-size:11px!important;letter-spacing:.04em;pointer-events:none}
+.se-chatlog{position:fixed;left:14px;bottom:72px;z-index:9998;width:min(420px,calc(100vw - 28px));max-height:150px;overflow:hidden;box-sizing:border-box;padding:8px 13px;font-size:13px;line-height:1.6;pointer-events:none;opacity:.92}
+.se-chatlog.is-active{opacity:1}
+.se-chatlog .se-chat-name{color:var(--accent);font-weight:700;margin-right:6px}
+.se-chat-input{position:fixed;left:50%;bottom:14px;transform:translateX(-50%);z-index:10000;width:min(520px,calc(100vw - 28px));height:44px;box-sizing:border-box;padding:0 16px;font-size:16px;outline:none}
+.se-chat-input::placeholder{color:var(--muted)}
+.se-overlay{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:var(--dim);font-family:var(--font-ui)}
+.se-card{position:relative;width:min(380px,calc(100vw - 32px));max-height:calc(100dvh - 32px);overflow:auto;box-sizing:border-box;padding:24px 22px 22px;background:var(--c-bg);color:var(--fg);border:var(--c-border);border-radius:var(--c-radius);box-shadow:var(--c-shadow);font-family:var(--font-ui)}
+.se-brand{font-size:12px;letter-spacing:.2em;color:var(--muted);margin-bottom:6px}
+.se-title{font-family:var(--font-title);font-size:25px;letter-spacing:.12em;margin-bottom:12px}
+.se-heading{font-family:var(--font-title);font-size:20px;letter-spacing:.2em;margin-bottom:16px}
+.se-message{min-height:20px;font-size:13px;line-height:1.5;margin-bottom:14px;color:var(--muted)}
+.se-message.is-error{color:#c0392b}
+.se-label{display:block;font-size:12px;letter-spacing:.1em;color:var(--muted);margin:0 0 6px}
+.se-field{display:block;width:100%;height:44px;box-sizing:border-box;margin:0 0 14px;padding:0 12px;border-radius:var(--f-radius);border:var(--f-border);background:var(--f-bg);color:var(--fg);font-size:16px;font-family:var(--font-ui);outline:none}
+.se-field:focus{border-color:var(--accent)}
+select.se-field{appearance:none;-webkit-appearance:none;background-image:linear-gradient(45deg,transparent 50%,var(--muted) 50%),linear-gradient(135deg,var(--muted) 50%,transparent 50%);background-position:calc(100% - 20px) 50%,calc(100% - 15px) 50%;background-size:5px 5px;background-repeat:no-repeat}
+.se-btn{display:flex;align-items:center;justify-content:center;gap:10px;width:100%;height:46px;box-sizing:border-box;border-radius:var(--b-radius);border:var(--b-border);background:var(--b-bg);color:var(--b-fg);font-size:15px;font-family:var(--font-ui);letter-spacing:.12em;cursor:pointer}
+.se-btn.is-primary{background:var(--bp-bg);color:var(--bp-fg);border:var(--bp-border)}
+.se-btn:active{transform:scale(.98)}
+.se-btn:disabled{opacity:.5;cursor:default}
+.se-row{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px}
+.se-races{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:16px}
+.se-chip{min-height:50px;border-radius:var(--b-radius);border:var(--f-border);background:var(--f-bg);color:var(--fg);font-size:13px;font-family:var(--font-ui);cursor:pointer}
+.se-chip.is-selected{border-color:var(--accent);box-shadow:inset 0 0 0 2px var(--accent)}
+.se-toggle{display:flex;align-items:center;justify-content:space-between;gap:12px;cursor:pointer;font-size:14px;padding:6px 0;border-bottom:1px solid var(--line)}
+.se-toggle input{appearance:none;-webkit-appearance:none;position:relative;width:42px;height:24px;margin:0;border-radius:999px;background:var(--line);cursor:pointer;flex:none}
+.se-toggle input::after{content:"";position:absolute;left:3px;top:3px;width:18px;height:18px;border-radius:50%;background:#fff;box-shadow:0 1px 2px rgba(0,0,0,.3);transition:transform .15s ease}
+.se-toggle input:checked{background:var(--accent)}
+.se-toggle input:checked::after{transform:translateX(18px)}
+.se-volume-head{display:flex;justify-content:space-between;font-size:14px;margin:14px 0 8px}
+.se-range{width:100%;margin:0 0 6px;accent-color:var(--accent)}
+.se-credits{margin-top:18px;padding-top:12px;border-top:1px solid var(--line);font-size:11px;line-height:1.55;color:var(--muted)}
+.se-credits a{color:var(--accent)}
+.se-actions{display:flex;gap:10px;margin-top:18px}
+
+/* ---------- A 便箋 ---------- */
+html[data-theme="A"] .se-hud-title{background:none;border:0;box-shadow:none;color:#fff8ec;writing-mode:vertical-rl;text-shadow:0 1px 6px rgba(40,20,10,.85);padding:0}
+html[data-theme="A"] .se-hud-title .se-hud-name{font-size:22px;letter-spacing:.3em}
+html[data-theme="A"] .se-hud-title .se-hud-sub{margin:0 8px 0 0;letter-spacing:.1em}
+html[data-theme="A"] .se-icon-btn{border-radius:50%;box-shadow:0 0 0 3px #f6efe2,0 0 0 4px #6b4a3a88}
+html[data-theme="A"] .se-chatlog{background:linear-gradient(90deg,rgba(30,15,8,.62),rgba(30,15,8,0));border:0;box-shadow:none;color:#fff8ec;text-shadow:0 1px 3px rgba(30,15,5,.9)}
+html[data-theme="A"] .se-chatlog .se-chat-name{color:#ffd9a8}
+html[data-theme="A"] .se-card{outline:1px solid #6b4a3a;outline-offset:-7px}
+html[data-theme="A"] .se-heading{text-align:center;letter-spacing:.35em;border-bottom:1px solid var(--line);padding-bottom:10px}
+
+/* ---------- D ホーロー看板 ---------- */
+html[data-theme="D"]{
+  --font-ui:"Yusei Magic",sans-serif;--font-title:"Yusei Magic",sans-serif;
+  --fg:#1f3a5f;--muted:#6a7c95;--accent:#c8423b;--line:#1f3a5f44;
+  --p-bg:#f4efe3;--p-fg:#1f3a5f;--p-border:3px solid #1f3a5f;--p-radius:8px;--p-shadow:inset 0 0 0 2px #f4efe3,inset 0 0 0 3px #1f3a5f,0 4px 10px rgba(0,0,0,.35);
+  --c-bg:#f4efe3;--c-border:3px solid #1f3a5f;--c-radius:10px;
+  --f-bg:#fff;--f-border:1.5px solid #1f3a5f;--f-radius:6px;
+  --b-bg:#f4efe3;--b-fg:#1f3a5f;--b-border:2px solid #1f3a5f;--b-radius:6px;
+  --bp-bg:#1f3a5f;--bp-fg:#f4efe3;--bp-border:2px solid #1f3a5f;
+  --dim:rgba(20,25,40,.5);
+}
+html[data-theme="D"] .se-icon-btn{border-radius:50%}
+html[data-theme="D"] .se-hud-sub{color:#c8423b;opacity:1!important}
+html[data-theme="D"] .se-heading{background:#c8423b;color:#f4efe3;text-align:center;margin:-24px -22px 14px;padding:9px;letter-spacing:.2em}
+
+/* ---------- E 障子・木枠 ---------- */
+html[data-theme="E"]{
+  --font-ui:"Shippori Mincho",serif;--font-title:"Shippori Mincho",serif;
+  --fg:#3b2a1e;--muted:#7b6450;--accent:#8a3b1e;--line:#6b4a2f55;
+  --p-bg:#f3ead8;--p-fg:#3b2a1e;--p-border:4px solid #6b4a2f;--p-radius:0;--p-shadow:inset 0 0 0 1px #b8946a,0 4px 10px rgba(0,0,0,.35);
+  --c-bg:#f3ead8;--c-border:5px solid #6b4a2f;--c-radius:0;
+  --f-bg:#fbf6ea;--f-border:1px solid #6b4a2f88;--f-radius:0;
+  --b-bg:#fbf6ea;--b-fg:#3b2a1e;--b-border:1px solid #6b4a2f;--b-radius:0;
+  --bp-bg:#6b4a2f;--bp-fg:#f3ead8;--bp-border:1px solid #6b4a2f;
+  --dim:rgba(30,20,10,.5);
+}
+html[data-theme="E"] .se-card{background:linear-gradient(#d8c7a866 1px,transparent 1px) 0 0/44px 44px,linear-gradient(90deg,#d8c7a866 1px,transparent 1px) 0 0/44px 44px,#f3ead8;box-shadow:inset 0 0 0 1px #b8946a,0 14px 34px rgba(0,0,0,.45)}
+html[data-theme="E"] .se-heading{text-align:center;letter-spacing:.4em;border-bottom:2px solid #6b4a2f;padding-bottom:8px}
+
+/* ---------- I 新聞・活版 ---------- */
+html[data-theme="I"]{
+  --font-ui:"Shippori Mincho",serif;--font-title:"Shippori Mincho",serif;
+  --fg:#111;--muted:#555;--accent:#111;--line:#1113;
+  --p-bg:#f2efe6;--p-fg:#111;--p-border:0;--p-radius:0;--p-shadow:0 3px 8px rgba(0,0,0,.3);
+  --c-bg:#f2efe6;--c-border:0;--c-radius:0;
+  --f-bg:#fff;--f-border:1px solid #111;--f-radius:0;
+  --b-bg:#f2efe6;--b-fg:#111;--b-border:1px solid #111;--b-radius:0;
+  --bp-bg:#111;--bp-fg:#f2efe6;--bp-border:1px solid #111;
+  --dim:rgba(10,10,10,.5);
+}
+html[data-theme="I"] .se-plate{border-top:3px double #111;border-bottom:1px solid #111}
+html[data-theme="I"] .se-chat-name{font-weight:800!important}
+html[data-theme="I"] .se-heading,html[data-theme="I"] .se-title{font-size:24px;text-align:center;border-bottom:3px double #111;padding-bottom:6px}
+
+/* ---------- L 絵本 ---------- */
+html[data-theme="L"]{
+  --font-ui:"Hachi Maru Pop",sans-serif;--font-title:"Hachi Maru Pop",sans-serif;
+  --fg:#6a4a5a;--muted:#a48896;--accent:#e0718b;--line:#f2a7b888;
+  --p-bg:#fff6e8;--p-fg:#6a4a5a;--p-border:3px solid #f2a7b8;--p-radius:22px 16px 24px 14px;--p-shadow:4px 4px 0 #f7d59a;
+  --c-bg:#fff6e8;--c-border:3px solid #f2a7b8;--c-radius:26px 18px 28px 16px;--c-shadow:6px 6px 0 #f7d59a;
+  --f-bg:#fff;--f-border:2px solid #f2a7b8;--f-radius:14px;
+  --b-bg:#fff;--b-fg:#6a4a5a;--b-border:2px solid #f2a7b8;--b-radius:999px;
+  --bp-bg:#f2a7b8;--bp-fg:#fff;--bp-border:2px solid #f2a7b8;
+  --dim:rgba(80,50,70,.4);
+}
+html[data-theme="L"] .se-icon-btn{border-radius:50%}
+html[data-theme="L"] .se-heading{text-align:center;color:#e0718b}
+
+/* ---------- N カセット80s ---------- */
+html[data-theme="N"]{
+  --font-ui:"Zen Maru Gothic",sans-serif;--font-title:"Zen Maru Gothic",sans-serif;
+  --fg:#3a2a1e;--muted:#7d6a55;--accent:#c0621f;--line:#3a2a1e33;
+  --p-bg:#f1e4c8;--p-fg:#3a2a1e;--p-border:0;--p-radius:6px;--p-shadow:0 3px 8px rgba(0,0,0,.35);
+  --c-bg:#f1e4c8;--c-border:0;--c-radius:8px;
+  --f-bg:#fbf3e0;--f-border:1px solid #3a2a1e44;--f-radius:4px;
+  --b-bg:#fbf3e0;--b-fg:#3a2a1e;--b-border:1px solid #3a2a1e;--b-radius:4px;
+  --bp-bg:#3a2a1e;--bp-fg:#f1e4c8;--bp-border:1px solid #3a2a1e;
+  --dim:rgba(30,20,10,.5);
+}
+html[data-theme="N"] .se-plate,html[data-theme="N"] .se-card{background-image:linear-gradient(transparent calc(100% - 9px),#e7892f calc(100% - 9px),#e7892f calc(100% - 6px),#a0522d calc(100% - 6px),#a0522d calc(100% - 3px),transparent calc(100% - 3px))}
+html[data-theme="N"] .se-heading,html[data-theme="N"] .se-title{font-weight:700}
+
+/* ---------- P 夜空・星 ---------- */
+html[data-theme="P"]{
+  --font-ui:"Kaisei Decol",serif;--font-title:"Kaisei Decol",serif;
+  --fg:#f5ecd2;--muted:#b9b09a;--accent:#e8c96a;--line:#c9a94f44;
+  --p-bg:radial-gradient(circle at 20% 30%,#fff 0 1px,transparent 1.5px) 0 0/60px 60px,radial-gradient(circle at 70% 60%,#fff 0 1px,transparent 1.5px) 0 0/80px 80px,radial-gradient(circle at 40% 80%,#ffe9a8 0 1px,transparent 1.5px) 0 0/70px 70px,#141a3a;
+  --p-fg:#f5ecd2;--p-border:1px solid #c9a94f;--p-radius:2px;--p-shadow:inset 0 0 0 3px #141a3a,inset 0 0 0 4px #c9a94f88,0 4px 12px rgba(0,0,0,.4);
+  --c-bg:radial-gradient(circle at 20% 30%,#fff 0 1px,transparent 1.5px) 0 0/60px 60px,radial-gradient(circle at 70% 60%,#fff 0 1px,transparent 1.5px) 0 0/80px 80px,radial-gradient(circle at 40% 80%,#ffe9a8 0 1px,transparent 1.5px) 0 0/70px 70px,#141a3a;
+  --c-border:1px solid #c9a94f;--c-radius:2px;--c-shadow:inset 0 0 0 4px #141a3a,inset 0 0 0 5px #c9a94f88,0 14px 34px rgba(0,0,0,.5);
+  --f-bg:#0e1330;--f-border:1px solid #c9a94f88;--f-radius:2px;
+  --b-bg:transparent;--b-fg:#e8c96a;--b-border:1px solid #c9a94f;--b-radius:2px;
+  --bp-bg:rgba(232,201,106,.12);--bp-fg:#e8c96a;--bp-border:1px solid #c9a94f;
+  --dim:rgba(5,8,25,.6);
+}
+html[data-theme="P"] .se-heading,html[data-theme="P"] .se-title{color:#e8c96a;text-align:center;letter-spacing:.3em}
+html[data-theme="P"] select.se-field option{background:#141a3a}
+
+/* ---------- R 風鈴 ---------- */
+html[data-theme="R"]{
+  --font-ui:"Zen Kurenaido",sans-serif;--font-title:"Zen Kurenaido",sans-serif;
+  --fg:#1f3f7a;--muted:#6b7fa6;--accent:#c8423b;--line:#1f3f7a33;
+  --p-bg:rgba(255,255,255,.8);--p-fg:#1f3f7a;--p-border:1px solid rgba(255,255,255,.95);--p-radius:12px;--p-shadow:0 4px 14px rgba(0,30,80,.25);
+  --c-bg:rgba(255,255,255,.9);--c-border:1px solid #fff;--c-radius:45% 45% 16px 16px / 34px 34px 16px 16px;
+  --f-bg:#fff;--f-border:1px solid #1f3f7a55;--f-radius:10px;
+  --b-bg:#fff;--b-fg:#1f3f7a;--b-border:1.5px solid #1f3f7a;--b-radius:999px;
+  --bp-bg:#1f3f7a;--bp-fg:#fff;--bp-border:1.5px solid #1f3f7a;
+  --dim:rgba(10,25,60,.35);
+}
+html[data-theme="R"] .se-icon-btn{border-radius:50%}
+html[data-theme="R"] .se-card{backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px)}
+html[data-theme="R"] .se-heading,html[data-theme="R"] .se-title{text-align:center;font-size:22px}
+html[data-theme="R"] .se-heading::after{content:"";display:block;height:3px;margin:6px auto 0;width:60%;background:#1f3f7a;border-radius:3px;transform:skewX(-20deg)}
