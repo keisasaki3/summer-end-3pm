@@ -1,12 +1,10 @@
 import { supabase, type PresenceStatus } from "./shared-backend";
-import { MAX_HEARTS } from "./intellect-battle";
+import { MAX_HEARTS, loadCastCounts } from "./intellect-battle";
 import { getImplementedSubjectNames, getPlayableTopicIds } from "./quiz-data";
 
-// ステータスウインドウと装備ウインドウ（β0.61）。
+// ステータスウインドウ。学問の行を押すとトピック一覧（★・詠唱回数つき）が開き、そこで魔法書を装備する。
 // 人生クエストのデータ（Supabase の quest_* テーブル）を読むだけで、書き換えはしない。
-// 装備した魔法書は今はこの端末の localStorage にだけ保存する。
-
-type Tab = "status" | "equip";
+// 装備した魔法書と詠唱回数は今はこの端末の localStorage にだけ保存する。
 
 export type StatusWindowOptions = {
   userId: string | null;
@@ -14,7 +12,6 @@ export type StatusWindowOptions = {
   presence: PresenceStatus;
   // 状態の変更。送れなかったら false を返す
   onPresence: (status: PresenceStatus) => boolean;
-  tab?: Tab;
 };
 
 type Subject = { subject_id: string; name_ja: string; icon: string; preset_group: string | null };
@@ -188,7 +185,7 @@ function canEquipBook(data: LifeQuestData, s: UserStatus) {
   return Boolean(preset && implemented.includes(preset.name_ja));
 }
 
-type BookChoice = { topic_id: string; name: string; field: string; mastered: boolean };
+type BookChoice = { topic_id: string; name: string; field: string; mastered: boolean; playable: boolean };
 
 async function loadBookChoices(data: LifeQuestData, s: UserStatus): Promise<BookChoice[]> {
   const choices: BookChoice[] = [];
@@ -196,7 +193,6 @@ async function loadBookChoices(data: LifeQuestData, s: UserStatus): Promise<Book
   const preset = data.subjects.get(s.preset_subject_id);
   if (!preset) return choices;
   const playableIds = await getPlayableTopicIds(preset.name_ja);
-  if (playableIds.size === 0) return choices;
   const sb = supabase!;
   const { data: fields, error } = await sb.from("quest_fields").select("field_id,name,sort_order").eq("subject_id", s.preset_subject_id).eq("active", true).order("sort_order");
   if (error) throw error;
@@ -210,9 +206,9 @@ async function loadBookChoices(data: LifeQuestData, s: UserStatus): Promise<Book
     topics.push(...rows);
   }
   topics.sort((a, b) => (fieldOrder.get(a.field_id)! - fieldOrder.get(b.field_id)!) || a.recommended_order - b.recommended_order || a.topic_id.localeCompare(b.topic_id));
+  // ★確認のため全トピックを並べるが、装備できるのはちゃんと実装した（出題可能な）トピックだけ
   for (const t of topics) {
-    if (!playableIds.has(t.topic_id)) continue; // ちゃんと実装した（出題可能な）トピックだけ選べるようにする
-    choices.push({ topic_id: t.topic_id, name: t.name, field: fieldName.get(t.field_id) || "", mastered: data.mastered.has(t.topic_id) });
+    choices.push({ topic_id: t.topic_id, name: t.name, field: fieldName.get(t.field_id) || "", mastered: data.mastered.has(t.topic_id), playable: playableIds.has(t.topic_id) });
   }
   return choices;
 }
@@ -220,6 +216,7 @@ async function loadBookChoices(data: LifeQuestData, s: UserStatus): Promise<Book
 export function openStatusWindow(opts: StatusWindowOptions) {
   cache = null; // 人生クエスト側の更新を拾うため、開くたびに読み直す
   let presence = opts.presence;
+  let view = 0; // 画面を切り替えたら増やし、古い読み込み結果で上書きしないようにする
   const overlay = el("div", "se-overlay");
   Object.assign(overlay.style, { display: "flex", zIndex: "16000" });
   const card = el("div", "se-card se-status-card");
@@ -236,23 +233,17 @@ export function openStatusWindow(opts: StatusWindowOptions) {
   overlay.addEventListener("click", (ev) => { if (ev.target === overlay) close(); });
   document.body.appendChild(overlay);
 
-  const tabs: [Tab, string][] = [["status", "ステータス"], ["equip", "装備"]];
-  const tabButtons = tabs.map(([id, label]) => {
+  const message = (text: string) => body.replaceChildren(el("div", "se-message", text));
+
+  const tabs: [string, () => void][] = [["ステータス", () => renderStatus()], ["持ち物", () => renderItems()]];
+  const tabButtons = tabs.map(([label, fn]) => {
     const b = el("button", "se-btn", label);
     b.type = "button";
-    b.addEventListener("click", () => show(id));
+    b.addEventListener("click", fn);
     tabRow.appendChild(b);
     return b;
   });
-
-  const message = (text: string) => body.replaceChildren(el("div", "se-message", text));
-
-  let current: Tab = opts.tab || "status";
-  function show(tab: Tab) {
-    current = tab;
-    tabButtons.forEach((b, i) => b.classList.toggle("is-primary", tabs[i][0] === tab));
-    if (tab === "status") renderStatus(); else renderEquip();
-  }
+  const markTab = (i: number) => tabButtons.forEach((b, j) => b.classList.toggle("is-primary", i === j));
 
   function presenceRow() {
     const row = el("div", "se-presence-row");
@@ -276,6 +267,8 @@ export function openStatusWindow(opts: StatusWindowOptions) {
   }
 
   async function renderStatus() {
+    const my = ++view;
+    markTab(0);
     if (!opts.userId || !supabase) {
       message("人生クエストのアカウントでログインすると、ステータスが表示される。");
       return;
@@ -285,79 +278,72 @@ export function openStatusWindow(opts: StatusWindowOptions) {
     try {
       data = await loadLifeQuest(opts.userId);
     } catch {
-      if (current === "status") message("人生クエストのデータを読み込めなかった。");
+      if (my === view) message("人生クエストのデータを読み込めなかった。");
       return;
     }
-    if (current !== "status") return;
+    if (my !== view) return;
+    const equipment = loadEquipment();
+    const casts = loadCastCounts();
     const head = el("div", "se-status-head");
     head.append(el("div", "se-status-name", opts.playerName), el("div", "se-status-lv", `Lv ${data.lv}`));
     const hearts = el("div", "se-status-hearts", "♥".repeat(MAX_HEARTS));
     const list = el("div", "se-lq-list");
     if (data.statuses.length === 0) list.appendChild(el("div", "se-message", "人生クエストにステータスがまだない。"));
     for (const s of data.statuses) {
-      const row = el("div", "se-lq-row");
+      const equippable = canEquipBook(data, s);
+      const row = el(equippable ? "button" : "div", "se-lq-row");
+      if (row instanceof HTMLButtonElement) row.type = "button";
       const badge = statusBadge(data, s);
-      row.append(statusIcon(data, s), el("span", "se-lq-name", statusName(data, s)), el("span", `se-lq-stars${badge.zero ? " is-zero" : ""}`, badge.text));
+      const name = el("span", "se-lq-name", statusName(data, s));
+      if (equippable) {
+        const book = equipment[s.status_id];
+        const n = book ? casts[book.topic_id] || 0 : 0;
+        const line = el("span", `se-lq-book${book ? "" : " is-empty"}`);
+        line.append(el("span", "se-lq-book-icon", "📖"), document.createTextNode(book ? `${book.name}${n ? `（詠唱 ${n}回）` : ""}` : "魔法書なし（押して装備）"));
+        name.appendChild(line);
+      }
+      row.append(statusIcon(data, s), name, el("span", `se-lq-stars${badge.zero ? " is-zero" : ""}`, badge.text));
+      if (equippable) {
+        row.append(el("span", "se-lq-chevron", "›"));
+        row.addEventListener("click", () => renderTopics(data, s));
+      }
       list.appendChild(row);
     }
     body.replaceChildren(head, hearts, el("div", "se-label", "状態"), presenceRow(), el("div", "se-label", "人生クエスト"), list);
   }
 
-  async function renderEquip() {
-    if (!opts.userId || !supabase) {
-      message("人生クエストのアカウントでログインすると、魔法書を装備できる。");
-      return;
-    }
-    message("読み込み中…");
-    let data: LifeQuestData;
-    try {
-      data = await loadLifeQuest(opts.userId);
-    } catch {
-      if (current === "equip") message("人生クエストのデータを読み込めなかった。");
-      return;
-    }
-    if (current !== "equip") return;
-    const equipment = loadEquipment();
-    const list = el("div", "se-lq-list");
-    const bookStatuses = data.statuses.filter((s) => canEquipBook(data, s));
-    if (bookStatuses.length === 0) list.appendChild(el("div", "se-message", "魔法書をつけられる学問がまだない。"));
-    for (const s of bookStatuses) {
-      const row = el("button", "se-lq-row se-equip-row");
-      row.type = "button";
-      const book = equipment[s.status_id];
-      row.append(statusIcon(data, s), el("span", "se-lq-name", statusName(data, s)), el("span", `se-equip-book${book ? "" : " is-empty"}`, book ? book.name : "なし"));
-      row.addEventListener("click", () => renderPicker(data, s));
-      list.appendChild(row);
-    }
-    body.replaceChildren(
-      el("div", "se-label", "魔法書（学問ごとに1冊）"), list,
-      el("div", "se-label", "その他の装備"), el("div", "se-message", "まだ何も持っていない。"),
-    );
-  }
-
-  async function renderPicker(data: LifeQuestData, s: UserStatus) {
+  async function renderTopics(data: LifeQuestData, s: UserStatus) {
+    const my = ++view;
+    markTab(0);
     message("読み込み中…");
     let choices: BookChoice[];
     try {
       choices = await loadBookChoices(data, s);
     } catch {
-      message("トピックを読み込めなかった。");
+      if (my === view) message("トピックを読み込めなかった。");
       return;
     }
-    if (current !== "equip") return;
+    if (my !== view) return;
     const equipment = loadEquipment();
+    const casts = loadCastCounts();
     const equipped = equipment[s.status_id]?.topic_id;
     const back = el("button", "se-btn", "もどる");
     back.type = "button";
-    back.addEventListener("click", () => renderEquip());
+    back.addEventListener("click", () => renderStatus());
+
+    const summary = el("div", "se-topic-summary");
+    const stars = choices.filter((c) => c.mastered).length;
+    const totalCasts = choices.reduce((n, c) => n + (casts[c.topic_id] || 0), 0);
+    summary.textContent = `★${stars} / ${choices.length}トピック　詠唱 ${totalCasts}回`;
+
     const list = el("div", "se-lq-list se-picker-list");
     if (equipped) {
-      const remove = el("button", "se-lq-row se-equip-row", "はずす");
+      const remove = el("button", "se-lq-row se-equip-row", "魔法書をはずす");
       remove.type = "button";
       remove.addEventListener("click", () => {
         delete equipment[s.status_id];
         saveEquipment(equipment);
-        renderEquip();
+        renderTopics(data, s);
       });
       list.appendChild(remove);
     }
@@ -367,20 +353,58 @@ export function openStatusWindow(opts: StatusWindowOptions) {
         lastField = c.field;
         list.appendChild(el("div", "se-picker-field", c.field));
       }
-      const row = el("button", `se-lq-row se-equip-row${c.topic_id === equipped ? " is-selected" : ""}`);
+      const row = el("button", `se-lq-row se-topic-row${c.topic_id === equipped ? " is-selected" : ""}${c.playable ? "" : " is-locked"}`);
       row.type = "button";
-      row.append(el("span", "se-lq-name", c.name), el("span", "se-lq-stars", c.mastered ? "★" : ""));
-      row.addEventListener("click", () => {
-        const subject = s.preset_subject_id ? data.subjects.get(s.preset_subject_id)?.name_ja : undefined;
-        equipment[s.status_id] = { topic_id: c.topic_id, name: c.name, subject };
-        saveEquipment(equipment);
-        renderEquip();
-      });
+      const n = casts[c.topic_id] || 0;
+      const tags = el("span", "se-topic-tags");
+      if (c.topic_id === equipped) tags.appendChild(el("span", "se-topic-tag is-equipped", "装備中"));
+      if (!c.playable) tags.appendChild(el("span", "se-topic-tag", "準備中"));
+      else if (n > 0) tags.appendChild(el("span", "se-topic-tag", `詠唱 ${n}回`));
+      row.append(el("span", `se-topic-star${c.mastered ? "" : " is-empty"}`, c.mastered ? "★" : "☆"), el("span", "se-lq-name", c.name), tags);
+      if (c.playable) {
+        row.addEventListener("click", () => {
+          if (c.topic_id === equipped) return;
+          confirmEquip(c.name, () => {
+            const subject = s.preset_subject_id ? data.subjects.get(s.preset_subject_id)?.name_ja : undefined;
+            equipment[s.status_id] = { topic_id: c.topic_id, name: c.name, subject };
+            saveEquipment(equipment);
+          }, () => renderTopics(data, s));
+        });
+      } else {
+        row.disabled = true;
+      }
       list.appendChild(row);
     }
-    if (choices.length === 0) list.appendChild(el("div", "se-message", "遊べるトピックがまだない。"));
-    body.replaceChildren(el("div", "se-label", `${statusName(data, s)}の魔法書を選ぶ`), list, back);
+    if (choices.length === 0) list.appendChild(el("div", "se-message", "トピックがまだない。"));
+    body.replaceChildren(el("div", "se-label", `${statusName(data, s)}　トピック`), summary, list, back);
   }
 
-  show(current);
+  // 持ち物（魔法書以外の道具。魔法書はステータスの学問の行から付け替える）
+  function renderItems() {
+    ++view;
+    markTab(1);
+    body.replaceChildren(
+      el("div", "se-label", "持ち物"), el("div", "se-message", "まだ何も持っていない。"),
+      el("div", "se-topic-summary", "魔法書はステータスの学問を押して装備する。"),
+    );
+  }
+
+  function confirmEquip(name: string, onYes: () => void, after: () => void) {
+    ++view;
+    const box = el("div", "se-confirm");
+    box.append(el("div", "se-confirm-text", `「${name}」を装備しますか？`));
+    const row = el("div", "se-actions se-confirm-actions");
+    const no = el("button", "se-btn", "いいえ");
+    no.type = "button";
+    const yes = el("button", "se-btn is-primary", "はい");
+    yes.type = "button";
+    no.addEventListener("click", after);
+    yes.addEventListener("click", () => { onYes(); after(); });
+    row.append(no, yes);
+    box.append(row);
+    body.replaceChildren(box);
+    setTimeout(() => yes.focus(), 0);
+  }
+
+  renderStatus();
 }

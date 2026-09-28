@@ -170,16 +170,58 @@ html[data-theme="R"] .se-card{backdrop-filter:blur(6px);-webkit-backdrop-filter:
 html[data-theme="R"] .se-heading,html[data-theme="R"] .se-title{text-align:center;font-size:22px}
 html[data-theme="R"] .se-heading::after{content:"";display:block;height:3px;margin:6px auto 0;width:60%;background:#1f3f7a;border-radius:3px;transform:skewX(-20deg)}
 
-/* 知性バトル（最小版） */
-.se-battle-hearts{font-size:22px;color:#d6455d;letter-spacing:.1em;margin:4px 0}
-.se-battle-enemies{font-size:13px;opacity:.8;margin-bottom:8px}
-.se-battle-prompt{font-size:22px;text-align:center;margin:8px 0 14px}
-.se-battle-choices{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px}
-.se-battle-choices:has(.se-battle-input-row){grid-template-columns:1fr}
-.se-battle-input-row{display:flex;gap:8px}
-.se-battle-input{flex:1;height:46px;box-sizing:border-box;border-radius:var(--b-radius);border:var(--b-border);background:var(--b-bg);color:var(--b-fg);font-size:15px;font-family:var(--font-ui);padding:0 12px}
-.se-battle-input-row .se-btn{width:auto;padding:0 18px}
-.se-battle-message{min-height:1.5em;font-size:14px;line-height:1.6}
+/* 知性バトル */
+.se-battle{--ok:#2f7d4f;--ng:#c0392b;--qfont:"BIZ UDPGothic","Zen Kaku Gothic New","Hiragino Sans",sans-serif}
+.se-battle-card{width:min(820px,calc(100vw - 24px));max-width:none;padding:26px 30px 24px}
+.se-battle-top{display:flex;justify-content:space-between;align-items:flex-end;gap:16px;padding-bottom:12px;border-bottom:1px solid var(--line);margin-bottom:12px}
+.se-battle-side{min-width:0}
+.se-battle-side.is-me{text-align:right}
+.se-battle-label{font-size:12px;letter-spacing:.2em;color:var(--muted)}
+.se-battle-name{font-family:var(--font-title);font-size:22px;letter-spacing:.08em;line-height:1.3}
+.se-battle-hearts{font-size:26px;line-height:1.1;color:#d6455d;letter-spacing:.12em}
+.se-battle-hearts.is-foe{color:var(--accent)}
+.se-battle-meta{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:12px;font-size:14px}
+.se-battle-book{padding:4px 12px;border:1px solid var(--line);border-radius:999px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+.se-battle-count{color:var(--muted);white-space:nowrap}
+.se-battle-panel{padding:22px 24px;margin-bottom:16px;border:1px solid var(--line);border-radius:8px;background:rgba(255,255,255,.55);color:#1d1a17}
+html[data-theme="P"] .se-battle-panel{background:rgba(255,255,255,.08);color:inherit}
+.se-battle-prompt{font-family:var(--qfont);font-size:clamp(20px,3vw,28px);line-height:1.7;letter-spacing:.02em;font-variant-numeric:tabular-nums;word-break:auto-phrase;overflow-wrap:anywhere}
+.se-battle-choices{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:10px;margin-bottom:14px}
+.se-battle-choices.is-input{grid-template-columns:minmax(0,1fr)}
+.se-battle-choice{display:flex;align-items:center;gap:12px;min-height:64px;padding:10px 14px;box-sizing:border-box;text-align:left;border-radius:var(--b-radius);border:var(--b-border);background:var(--b-bg);color:var(--b-fg);cursor:pointer;font:inherit}
+.se-battle-choice:hover:not(:disabled){filter:brightness(.95)}
+.se-battle-choice:active:not(:disabled){transform:scale(.99)}
+.se-battle-choice:disabled{cursor:default;opacity:.55}
+.se-battle-choice-no{flex:none;width:28px;height:28px;display:flex;align-items:center;justify-content:center;border-radius:50%;border:1px solid currentColor;font-size:14px;font-family:var(--qfont)}
+.se-battle-choice-text{font-family:var(--qfont);font-size:20px;line-height:1.45;overflow-wrap:anywhere}
+.se-battle-choice.is-correct{opacity:1;border-color:var(--ok);box-shadow:inset 0 0 0 2px var(--ok);background:#e3f3e8;color:#1d1a17}
+.se-battle-choice.is-wrong{opacity:1;border-color:var(--ng);box-shadow:inset 0 0 0 2px var(--ng);background:#f8e1de;color:#1d1a17}
+.se-battle-input-row{display:flex;gap:10px}
+.se-battle-input{flex:1;min-width:0;width:0;height:60px;box-sizing:border-box;border-radius:var(--b-radius);border:var(--b-border);background:#fff;color:#1d1a17;font-size:26px;font-family:var(--qfont);padding:0 16px}
+.se-battle-input.is-correct{border-color:var(--ok);box-shadow:inset 0 0 0 2px var(--ok)}
+.se-battle-input.is-wrong{border-color:var(--ng);box-shadow:inset 0 0 0 2px var(--ng)}
+.se-battle-input-row .se-btn{width:auto;height:60px;padding:0 26px;font-size:17px}
+.se-battle-feedback{display:none;margin-bottom:14px;padding:14px 18px;border-radius:8px;border-left:6px solid var(--muted);background:rgba(255,255,255,.6);color:#1d1a17;line-height:1.65}
+.se-battle-feedback.is-good,.se-battle-feedback.is-bad,.se-battle-feedback.is-info{display:block}
+.se-battle-feedback.is-good{border-left-color:var(--ok)}
+.se-battle-feedback.is-bad{border-left-color:var(--ng)}
+.se-battle-verdict{font-family:var(--font-title);font-size:24px;letter-spacing:.1em}
+.is-good .se-battle-verdict{color:var(--ok)}
+.is-bad .se-battle-verdict{color:var(--ng)}
+.se-battle-answer{font-family:var(--qfont);font-size:18px;font-weight:700;margin-top:2px}
+.se-battle-explain{font-family:var(--qfont);font-size:16px;margin-top:4px}
+.se-battle-extra{font-size:15px;margin-top:6px;color:#5a4a40}
+.se-battle-actions .se-btn{height:52px;font-size:16px}
+@media (max-width:600px){
+  .se-battle-card{padding:18px 16px 16px}
+  .se-battle-choices{grid-template-columns:minmax(0,1fr)}
+  .se-battle-input-row .se-btn{padding:0 14px;letter-spacing:.04em}
+  .se-battle-choice{min-height:56px}
+  .se-battle-choice-text{font-size:18px}
+  .se-battle-panel{padding:16px}
+  .se-battle-name{font-size:18px}
+  .se-battle-hearts{font-size:22px}
+}
 .se-book-tabs{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:10px}
 .se-book-tabs .se-btn{height:36px;font-size:13px;letter-spacing:.04em}
 .se-book-list{max-height:55vh;overflow-y:auto;margin-bottom:10px}
@@ -210,3 +252,20 @@ button.se-lq-row:hover,.se-lq-row.is-selected{background:rgba(127,127,127,.15)}
 .se-lq-stars.is-zero,.se-equip-book.is-empty{opacity:.45}
 .se-equip-book{flex:none;max-width:55%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13px}
 .se-picker-field{font-size:12px;opacity:.7;margin-top:8px}
+
+/* ステータス画面からの魔法書装備 */
+.se-lq-name .se-lq-book{display:block;font-size:12px;opacity:.75;margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.se-lq-book.is-empty{opacity:.45}
+.se-lq-chevron{flex:none;font-size:18px;opacity:.5;margin-left:2px}
+.se-topic-summary{font-size:13px;opacity:.8;margin:-4px 0 6px}
+.se-topic-row{padding:7px 6px}
+.se-topic-row.is-locked{opacity:.45;cursor:default}
+.se-topic-star{flex:none;width:16px;text-align:center;color:#c9962b}
+.se-topic-star.is-empty{opacity:.35;color:inherit}
+.se-topic-tags{flex:none;display:flex;gap:4px}
+.se-topic-tag{font-size:11px;padding:1px 7px;border:1px solid rgba(127,127,127,.5);border-radius:999px;white-space:nowrap}
+.se-topic-tag.is-equipped{border-color:var(--accent);color:var(--accent);font-weight:bold}
+.se-confirm{padding:18px 4px 6px;text-align:center}
+.se-confirm-text{font-size:18px;line-height:1.6;margin-bottom:18px}
+.se-confirm-actions{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.se-lq-book-icon{margin-right:4px;font-size:11px}

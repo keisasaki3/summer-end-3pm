@@ -4,3 +4,4 @@ dist/
 update.zip
 *.log
 .env
+__pycache__/
