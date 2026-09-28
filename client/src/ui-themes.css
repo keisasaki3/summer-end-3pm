@@ -17,6 +17,7 @@
 .se-hud-title .se-hud-sub{font-size:11px;letter-spacing:.12em;opacity:.8;margin-top:2px}
 .se-icon-btn{position:fixed;right:14px;top:14px;z-index:30;width:42px;height:42px;padding:0;display:flex;align-items:center;justify-content:center;cursor:pointer}
 .se-book-btn{right:66px}
+.se-status-btn{right:118px}
 .se-icon-btn:active{transform:scale(.94)}
 .se-icon-btn svg{width:21px;height:21px}
 .se-coord{position:fixed;right:14px;top:66px;z-index:29;padding:4px 9px;font-size:11px!important;letter-spacing:.04em;pointer-events:none}
@@ -182,3 +183,25 @@ html[data-theme="R"] .se-heading::after{content:"";display:block;height:3px;marg
 .se-book-prompt{font-size:16px}
 .se-book-answer{font-size:13px;opacity:.85;margin-top:2px}
 .se-book-explain{font-size:12px;opacity:.7;margin-top:2px}
+
+/* ステータス・装備ウインドウ（β0.61） */
+.se-status-card{max-width:460px;width:100%}
+.se-status-body{max-height:62vh;overflow-y:auto;margin-bottom:12px}
+.se-status-head{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:10px}
+.se-status-name{font-size:18px;font-weight:bold}
+.se-status-lv{font-size:18px}
+.se-presence-row{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin:6px 0 14px}
+.se-presence-btn{box-sizing:border-box;min-width:0;display:flex;align-items:center;gap:6px;padding:6px 8px;border:1px solid currentColor;border-radius:6px;background:transparent;color:inherit;font:inherit;font-size:13px;cursor:pointer;opacity:.6}
+.se-presence-btn img{width:16px;height:16px;image-rendering:pixelated}
+.se-presence-btn.is-selected{opacity:1;font-weight:bold;box-shadow:inset 0 0 0 2px currentColor}
+.se-lq-list{display:flex;flex-direction:column;gap:2px;margin:6px 0 14px}
+.se-lq-row{box-sizing:border-box;display:flex;align-items:center;gap:8px;padding:5px 6px;border-bottom:1px dashed rgba(127,127,127,.35);font:inherit;font-size:14px;color:inherit;background:transparent;text-align:left;width:100%}
+button.se-lq-row{border-top:0;border-left:0;border-right:0;cursor:pointer}
+button.se-lq-row:hover,.se-lq-row.is-selected{background:rgba(127,127,127,.15)}
+.se-lq-pixicon{width:16px;height:16px;image-rendering:pixelated;flex:none}
+.se-lq-icon{width:16px;text-align:center;flex:none}
+.se-lq-name{flex:1;min-width:0}
+.se-lq-stars{flex:none;font-weight:bold}
+.se-lq-stars.is-zero,.se-equip-book.is-empty{opacity:.45}
+.se-equip-book{flex:none;max-width:55%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13px}
+.se-picker-field{font-size:12px;opacity:.7;margin-top:8px}
