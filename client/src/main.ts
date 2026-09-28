@@ -1825,24 +1825,35 @@ for(const race of usableRaces){
   }
 }
 
-// PC・スマホとも画面いっぱいに表示し、カメラがプレイヤーを追う。
-// スマホ（タッチ操作かつ短辺600px以下）は画面1px＝ワールド1px（狭い範囲を映す）。
-// PCはおおむね1280x720相当の範囲が見えるよう、ウィンドウの大きさに合わせて拡大する。
-// どちらもマップ(1536x864)の外が見えないよう、必要なら拡大する。
+// スマホ（タッチ操作かつ短辺600px以下）は画面いっぱいに表示し、画面1px＝ワールド1pxでカメラがプレイヤーを追う。
+// PCは常に16:9（1280x720相当）の縦横比を保ったまま、ウィンドウに収まる最大サイズまで拡大する
+// （Phaser Scale.FITが担当。ウィンドウの形がまちまちでも、拡大縮小だけで縦横比は絶対に崩れない。
+// はみ出す分は上下または左右が黒帯になる）。以前はPCのゲーム画面が常に1280x720の実ピクセルに
+// 固定されていて、大きい画面では中央に小さく残っていた。
 const IS_MOBILE =
   window.matchMedia("(pointer: coarse)").matches &&
   Math.min(window.innerWidth, window.innerHeight) <= 600;
 
+const PC_BASE_WIDTH = 1280, PC_BASE_HEIGHT = 720;
+
 type ViewInfo = { width:number; height:number; zoom:number; textRes:number };
 
+// 高精細画面では2倍で描画する（キャンバスが大きくなりすぎる場合は上限で1倍に留める）。
+function devicePixelZoom(areaPx:number):number {
+  return (window.devicePixelRatio||1) > 1 && areaPx <= 2400000 ? 2 : 1;
+}
+
 function computeView():ViewInfo {
+  if(!IS_MOBILE){
+    const z=devicePixelZoom(PC_BASE_WIDTH*PC_BASE_HEIGHT);
+    // 文字は表示倍率と同じ解像度で描く（低いとかすれ、pixelArtで縮小すると線が抜ける）。
+    return { width:PC_BASE_WIDTH*z, height:PC_BASE_HEIGHT*z, zoom:z, textRes:z };
+  }
   const w=Math.max(1,window.innerWidth), h=Math.max(1,window.innerHeight);
-  const fit=Math.max(w/1536,h/864);
-  const k=IS_MOBILE ? Math.max(1,fit) : Math.max(Math.min(w/1280,h/720),fit);
-  // 高精細画面では2倍で描画する（大きすぎるキャンバスは重いので上限あり）。
-  const z=(window.devicePixelRatio||1)>1 && w*h<=2400000 ? 2 : 1;
-  const zoom=k*z;
-  // 文字は表示倍率以上の解像度で描く（低いと拡大でかすれ、pixelArtで縮小すると線が抜ける）。
+  // 画面がマップ(1536x864)より大きい方向だけ拡大して、マップ外が見えないようにする。
+  const fit=Math.max(1,w/1536,h/864);
+  const z=devicePixelZoom(w*h);
+  const zoom=fit*z;
   return { width:Math.round(w*z), height:Math.round(h*z), zoom, textRes:Math.min(4,Math.max(1,Math.ceil(zoom))) };
 }
 
@@ -1865,11 +1876,16 @@ const game=new Phaser.Game({
   render:{pixelArt:true,antialias:false}
 });
 
-const resizeGame=()=>{
-  VIEW=computeView();
-  game.scale.resize(VIEW.width,VIEW.height);
-  const scene=game.scene.getScenes(true)[0] as WalkScene | undefined;
-  scene?.applyView();
-};
-window.addEventListener("resize",resizeGame);
-window.addEventListener("orientationchange",()=>setTimeout(resizeGame,200));
+// PCはゲームの実ピクセルサイズ（縦横比）自体を変えないので、ウィンドウのリサイズは
+// Phaser Scale.FITが自動で拡大縮小してくれる。スマホだけ、画面サイズに合わせて実際に
+// ゲームサイズとカメラ倍率を計算し直す必要がある。
+if(IS_MOBILE){
+  const resizeGame=()=>{
+    VIEW=computeView();
+    game.scale.resize(VIEW.width,VIEW.height);
+    const scene=game.scene.getScenes(true)[0] as WalkScene | undefined;
+    scene?.applyView();
+  };
+  window.addEventListener("resize",resizeGame);
+  window.addEventListener("orientationchange",()=>setTimeout(resizeGame,200));
+}
