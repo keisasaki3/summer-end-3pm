@@ -175,6 +175,10 @@ html[data-theme="R"] .se-heading::after{content:"";display:block;height:3px;marg
 .se-battle-enemies{font-size:13px;opacity:.8;margin-bottom:8px}
 .se-battle-prompt{font-size:22px;text-align:center;margin:8px 0 14px}
 .se-battle-choices{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px}
+.se-battle-choices:has(.se-battle-input-row){grid-template-columns:1fr}
+.se-battle-input-row{display:flex;gap:8px}
+.se-battle-input{flex:1;height:46px;box-sizing:border-box;border-radius:var(--b-radius);border:var(--b-border);background:var(--b-bg);color:var(--b-fg);font-size:15px;font-family:var(--font-ui);padding:0 12px}
+.se-battle-input-row .se-btn{width:auto;padding:0 18px}
 .se-battle-message{min-height:1.5em;font-size:14px;line-height:1.6}
 .se-book-tabs{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:10px}
 .se-book-tabs .se-btn{height:36px;font-size:13px;letter-spacing:.04em}

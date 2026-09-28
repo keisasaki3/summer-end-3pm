@@ -1,5 +1,10 @@
-// 知性バトル（最小版）: 問題づくり・問題図鑑・戦闘画面。
-// 最小版は数学「分数の加法・減法」1トピックのみ。問題は型から毎回ランダムに作る。
+// 知性バトル: 問題づくり・問題図鑑・戦闘画面。
+// 装備した魔法書（学問＋トピック）に実際のクイズデータ（quiz-data.ts）があればそこから出題し、
+// 無ければ数学「分数の加法・減法」（唯一のハードコード生成コード）にフォールバックする。
+// 「ちゃんと実装したトピックだけ遊ばせる」方針（Keita 2026-09-28）により、
+// 装備画面（status-window.ts）側でも quiz-data.ts の出題可能判定を使って選べるトピックを絞っている。
+
+import { getPlayableTopicIds, loadSubjectTopics, type KnowledgeTopic, type RawKnowledgeQuestion } from "./quiz-data";
 
 export type Question = {
   id: string;
@@ -8,7 +13,12 @@ export type Question = {
   choices: string[];
   answerIndex: number;
   explain: string;
+  // 数字入力・並べ替え型の問題は選択肢ではなく文字入力で答える
+  inputMode?: "text";
+  expectedAnswer?: string;
 };
+
+export type EquippedTopic = { subject: string; topicId: string; topicName: string };
 
 type BookEntry = {
   topic: string;
@@ -19,6 +29,7 @@ type BookEntry = {
   wrong: number;
   weak: boolean;
   lastSeen: number;
+  inputMode?: "text";
 };
 
 const BOOK_KEY = "summer-end-3pm-question-book";
@@ -84,6 +95,43 @@ export function makeFractionQuestion(): Question {
     explain:`仮分数にすると ${N1}/${b} − ${n2}/${d} ＝ ${x}/${L} − ${y}/${L} ＝ ${n}/${L}。答えは ${answer}。` };
 }
 
+// quiz-data.ts の生データ（knowledge型）を実際のQuestionに変換する。
+// 4択は選択肢の並びをシャッフルして正解位置を固定化しない。○×もランダムに並べる。
+// 数字入力・並べ替えは選択肢ではなく文字入力で答える形にする。
+function normalizeKnowledgeQuestion(topic: KnowledgeTopic, raw: RawKnowledgeQuestion): Question {
+  const id = `${topic.topic_id}:${raw.id}`;
+  if (raw.format === "4択" && Array.isArray(raw.options)) {
+    const options = raw.options;
+    const correctIndex = raw.answer as number;
+    const order = options.map((_, i) => i).sort(() => Math.random() - .5);
+    const choices = order.map((i) => options[i]);
+    const answerIndex = order.indexOf(correctIndex);
+    return { id, topic: topic.topic, prompt: raw.prompt, choices, answerIndex, explain: raw.explain };
+  }
+  if (raw.format === "○×") {
+    const isTrue = raw.answer as boolean;
+    const choices = Math.random() < 0.5 ? ["○", "×"] : ["×", "○"];
+    const answerIndex = choices.indexOf(isTrue ? "○" : "×");
+    return { id, topic: topic.topic, prompt: raw.prompt, choices, answerIndex, explain: raw.explain };
+  }
+  // 数字入力・並べ替え
+  const expected = Array.isArray(raw.answer) ? raw.answer.join(",") : String(raw.answer);
+  return { id, topic: topic.topic, prompt: raw.prompt, choices: [], answerIndex: -1, explain: raw.explain,
+    inputMode: "text", expectedAnswer: expected };
+}
+
+// 装備中のトピックから問題を1つ作る。実データが無い／読み込めない場合は undefined を返す（呼び出し側でフォールバック）。
+export async function makeQuestionForEquippedTopic(equipped: EquippedTopic): Promise<Question | undefined> {
+  if (equipped.topicId === "math-number-calculation-017") return makeFractionQuestion();
+  const topics = await loadSubjectTopics(equipped.subject);
+  const topic = topics.find((t) => t.topic_id === equipped.topicId);
+  if (!topic || topic.type !== "knowledge" || topic.questions.length === 0) return undefined;
+  const raw = topic.questions[rand(0, topic.questions.length - 1)];
+  return normalizeKnowledgeQuestion(topic, raw);
+}
+
+export { getPlayableTopicIds };
+
 function loadBook(): Record<string,BookEntry> {
   try { return JSON.parse(localStorage.getItem(BOOK_KEY) || "{}") || {}; } catch { return {}; }
 }
@@ -93,7 +141,9 @@ function saveBook(book:Record<string,BookEntry>) {
 
 function record(q:Question, result:"solved"|"wrong"|"unknown") {
   const book=loadBook();
-  const e=book[q.id] ?? { topic:q.topic, prompt:q.prompt, answer:q.choices[q.answerIndex], explain:q.explain, solved:0, wrong:0, weak:false, lastSeen:0 };
+  const answerText = q.inputMode==="text" ? (q.expectedAnswer ?? "") : q.choices[q.answerIndex];
+  const e=book[q.id] ?? { topic:q.topic, prompt:q.prompt, answer:answerText, explain:q.explain, solved:0, wrong:0, weak:false, lastSeen:0, inputMode:q.inputMode };
+  e.inputMode=q.inputMode;
   if(result==="solved"){ e.solved++; e.weak=false; }
   else { e.wrong++; e.weak=true; }
   e.lastSeen=Date.now();
@@ -101,12 +151,15 @@ function record(q:Question, result:"solved"|"wrong"|"unknown") {
   saveBook(book);
 }
 
-// 苦手枠: 間違えた・わからんだった問題から1つ（選択肢は作り直す）
+// 苦手枠: 間違えた・わからんだった問題から1つ（4択・○×型は選択肢を作り直す。数字入力型はそのまま再出題）
 function pickWeakQuestion(excludeId:string): Question | undefined {
   const book=loadBook();
   const weak=Object.entries(book).filter(([id,e])=>e.weak && id!==excludeId);
   if(weak.length===0) return undefined;
   const [id,e]=weak[rand(0,weak.length-1)];
+  if(e.inputMode==="text"){
+    return { id, topic:e.topic, prompt:e.prompt, choices:[], answerIndex:-1, explain:e.explain, inputMode:"text", expectedAnswer:e.answer };
+  }
   const others=Object.values(book).map(x=>x.answer).filter(a=>a!==e.answer);
   const {choices,answerIndex}=buildChoices(e.answer,others.sort(()=>Math.random()-.5));
   return { id, topic:e.topic, prompt:e.prompt, choices, answerIndex, explain:e.explain };
@@ -125,8 +178,17 @@ function el<K extends keyof HTMLElementTagNameMap>(tag:K, className="", text="")
 }
 
 // 戦闘画面。onEnd("win") で勝利、onEnd("lose") でハートが0になった。
-export function openBattle(enemyName:string, onEnd:(result:"win"|"lose")=>void) {
-  const first=makeFractionQuestion();
+// equipped が渡されて実際に出題可能なら装備中トピックから出題し、無ければ分数の加法・減法にフォールバックする。
+export async function openBattle(enemyName:string, onEnd:(result:"win"|"lose")=>void, equipped?:EquippedTopic) {
+  const nextQuestion=async ():Promise<Question> => {
+    if(equipped){
+      const q=await makeQuestionForEquippedTopic(equipped);
+      if(q) return q;
+    }
+    return makeFractionQuestion();
+  };
+
+  const first=await nextQuestion();
   const enemies:Enemy[]=[{ name:enemyName, question:first, weak:false, hearts:ENEMY_HEARTS }];
   const weakQ=pickWeakQuestion(first.id);
   if(weakQ) enemies.push({ name:`苦手な${enemyName}`, question:weakQ, weak:true, hearts:ENEMY_HEARTS });
@@ -166,16 +228,32 @@ export function openBattle(enemyName:string, onEnd:(result:"win"|"lose")=>void) 
     const enemy=enemies[0];
     locked=false;
     head.textContent=enemy.weak ? `${enemy.name}も現れた！` : `${enemy.name}が現れた！`;
+    book.textContent=`魔法書：${enemy.question.topic}`;
     renderHearts(); renderEnemies();
     prompt.textContent=enemy.question.prompt;
     message.textContent="";
     nextBtn.style.display="none"; unknownBtn.style.display="";
-    choiceBox.replaceChildren(...enemy.question.choices.map((c,i)=>{
-      const b=el("button","se-btn",c);
-      b.type="button";
-      b.addEventListener("click",()=>answer(i));
-      return b;
-    }));
+    if(enemy.question.inputMode==="text"){
+      const input=el("input","se-battle-input");
+      input.type="text";
+      input.autocomplete="off";
+      const submit=el("button","se-btn is-primary","こたえる");
+      submit.type="button";
+      const row=el("div","se-battle-input-row");
+      row.append(input,submit);
+      choiceBox.replaceChildren(row);
+      const submitFn=()=>{ if(!locked) answerText(input.value); };
+      submit.addEventListener("click",submitFn);
+      input.addEventListener("keydown",(ev)=>{ if(ev.key==="Enter") submitFn(); });
+      setTimeout(()=>input.focus(),0);
+    } else {
+      choiceBox.replaceChildren(...enemy.question.choices.map((c,i)=>{
+        const b=el("button","se-btn",c);
+        b.type="button";
+        b.addEventListener("click",()=>answer(i));
+        return b;
+      }));
+    }
   };
 
   const lockChoices=(correct:number,picked:number)=>{
@@ -188,6 +266,12 @@ export function openBattle(enemyName:string, onEnd:(result:"win"|"lose")=>void) 
     });
   };
 
+  const lockInput=()=>{
+    locked=true;
+    const row=choiceBox.firstElementChild;
+    row?.querySelectorAll("input,button").forEach((el)=>((el as HTMLInputElement|HTMLButtonElement).disabled=true));
+  };
+
   const defeat=(text:string)=>{
     const enemy=enemies.shift()!;
     message.textContent=`${text}${enemy.name}をたおした！`;
@@ -195,18 +279,16 @@ export function openBattle(enemyName:string, onEnd:(result:"win"|"lose")=>void) 
     showNext(()=>enemies.length>0 ? ask() : close("win"));
   };
 
-  const answer=(i:number)=>{
-    if(locked) return;
+  const resolveResult=async (correct:boolean)=>{
     const enemy=enemies[0];
     const q=enemy.question;
-    lockChoices(q.answerIndex,i);
-    if(i===q.answerIndex){
+    if(correct){
       record(q,"solved");
       enemy.hearts--;
       if(enemy.hearts<=0){ defeat("正解！ "); return; }
       renderEnemies();
       message.textContent=`正解！ ${enemy.name}のハートが1つ減った。`;
-      enemy.question=makeFractionQuestion();
+      enemy.question=await nextQuestion();
       showNext(ask);
       return;
     }
@@ -220,16 +302,33 @@ export function openBattle(enemyName:string, onEnd:(result:"win"|"lose")=>void) 
       return;
     }
     // 次の問題（通常の敵は作り直し、苦手枠は同じ問題）
-    if(!enemy.weak) enemy.question=makeFractionQuestion();
+    if(!enemy.weak) enemy.question=await nextQuestion();
     showNext(ask);
+  };
+
+  const answer=(i:number)=>{
+    if(locked) return;
+    const q=enemies[0].question;
+    lockChoices(q.answerIndex,i);
+    void resolveResult(i===q.answerIndex);
+  };
+
+  const answerText=(value:string)=>{
+    if(locked) return;
+    const q=enemies[0].question;
+    const correct=value.trim()===String(q.expectedAnswer ?? "").trim();
+    lockInput();
+    if(!correct) message.textContent=`正解は ${q.expectedAnswer}。`;
+    void resolveResult(correct);
   };
 
   unknownBtn.addEventListener("click",()=>{
     if(locked) return;
     const q=enemies[0].question;
-    lockChoices(q.answerIndex,-1);
+    const answerLabel=q.inputMode==="text" ? (q.expectedAnswer ?? "") : q.choices[q.answerIndex];
+    if(q.inputMode==="text") lockInput(); else lockChoices(q.answerIndex,-1);
     record(q,"unknown");
-    message.textContent=`正解は ${q.choices[q.answerIndex]}。${q.explain} `;
+    message.textContent=`正解は ${answerLabel}。${q.explain} `;
     const enemy=enemies.shift()!;
     message.textContent+=`${enemy.name}をたおした！`;
     renderEnemies();
