@@ -64,8 +64,8 @@ class WalkScene extends Phaser.Scene {
 
   // タッチ操作: どこでもドラッグで出るスティック / 短いタップでその場所へ歩く。
   private joystick = { active:false, pointerId:-1, originX:0, originY:0, dx:0, dy:0, downAt:0, dragging:false };
-  private joystickBase?: Phaser.GameObjects.Arc;
-  private joystickKnob?: Phaser.GameObjects.Arc;
+  private joystickBase?: HTMLDivElement;
+  private joystickKnob?: HTMLDivElement;
   private moveTarget?: { x:number; y:number; lastProgressAt:number; lastDist:number };
   private moveMarker?: Phaser.GameObjects.Arc;
   private chatInput?: HTMLInputElement;
@@ -208,6 +208,7 @@ class WalkScene extends Phaser.Scene {
   create() {
     this.installInputIsolation();
     this.cameras.main.setBackgroundColor("#c88f72");
+    this.cameras.main.setZoom(RENDER_ZOOM);
     this.setupImageField();
 
     if (this.input.keyboard) {
@@ -265,7 +266,7 @@ class WalkScene extends Phaser.Scene {
     visual.setScale(height);
 
     const name=this.add.text(0,-88*height,this.playerLabel(label,status),{
-      fontFamily:this.uiTheme.font,fontSize:"11px",color:this.uiTheme.nameFg,
+      fontFamily:this.uiTheme.font,fontSize:"12px",color:this.uiTheme.nameFg,
       backgroundColor:this.uiTheme.nameBg,padding:{x:7,y:3}
     }).setOrigin(.5).setResolution(2);
 
@@ -1320,7 +1321,7 @@ for(const race of usableRaces){
     themeSelect.style.marginBottom="0";
     for(const theme of UI_THEMES){
       const option=document.createElement("option");
-      option.value=theme.id;option.textContent=`${theme.id}　${theme.label}`;themeSelect.appendChild(option);
+      option.value=theme.id;option.textContent=theme.label;themeSelect.appendChild(option);
     }
     themeSelect.value=this.uiTheme.id;
     themeSelect.addEventListener("change",()=>this.setUiTheme(themeSelect.value as UiThemeId));
@@ -1548,28 +1549,42 @@ for(const race of usableRaces){
   }
 
   private setupTouchControls(){
+    // スティックは画面(CSS px)基準のDOMで描く。描画倍率やカメラのズームに影響されない。
     const R=52, DRAG_START=10;
-    this.joystickBase=this.add.circle(0,0,R,0x000000,.22).setStrokeStyle(2,0xffffff,.55).setScrollFactor(0).setDepth(3000).setVisible(false);
-    this.joystickKnob=this.add.circle(0,0,22,0xffffff,.7).setScrollFactor(0).setDepth(3001).setVisible(false);
+    const base=document.createElement("div");
+    Object.assign(base.style,{position:"fixed",left:"0",top:"0",width:`${R*2}px`,height:`${R*2}px`,marginLeft:`${-R}px`,marginTop:`${-R}px`,
+      borderRadius:"50%",border:"2px solid rgba(255,255,255,.6)",background:"rgba(0,0,0,.22)",zIndex:"9000",pointerEvents:"none",display:"none"} as Partial<CSSStyleDeclaration>);
+    const knob=document.createElement("div");
+    Object.assign(knob.style,{position:"fixed",left:"0",top:"0",width:"44px",height:"44px",marginLeft:"-22px",marginTop:"-22px",
+      borderRadius:"50%",background:"rgba(255,255,255,.72)",zIndex:"9001",pointerEvents:"none",display:"none"} as Partial<CSSStyleDeclaration>);
+    document.body.append(base,knob);
+    this.joystickBase=base;this.joystickKnob=knob;
+    // ポインタ座標（ゲーム内px）→ 画面座標（CSS px）
+    const toScreen=(p:Phaser.Input.Pointer)=>({
+      x:p.x/this.scale.displayScale.x+this.scale.canvasBounds.x,
+      y:p.y/this.scale.displayScale.y+this.scale.canvasBounds.y
+    });
     this.moveMarker=this.add.circle(0,0,9,0xffffff,0).setStrokeStyle(2,0xffffff,.9).setDepth(5).setVisible(false);
     this.input.addPointer(1);
 
     this.input.on("pointerdown",(p:Phaser.Input.Pointer)=>{
       if(this.loginOpen || this.joystick.active)return;
-      Object.assign(this.joystick,{active:true,pointerId:p.id,originX:p.x,originY:p.y,dx:0,dy:0,downAt:performance.now(),dragging:false});
+      const sp=toScreen(p);
+      Object.assign(this.joystick,{active:true,pointerId:p.id,originX:sp.x,originY:sp.y,dx:0,dy:0,downAt:performance.now(),dragging:false});
     });
     this.input.on("pointermove",(p:Phaser.Input.Pointer)=>{
       if(!this.joystick.active||p.id!==this.joystick.pointerId)return;
-      const ox=p.x-this.joystick.originX, oy=p.y-this.joystick.originY, len=Math.hypot(ox,oy);
+      const sp=toScreen(p);
+      const ox=sp.x-this.joystick.originX, oy=sp.y-this.joystick.originY, len=Math.hypot(ox,oy);
       if(!this.joystick.dragging){
         if(len<DRAG_START)return;
         this.joystick.dragging=true;
         this.clearMoveTarget();
-        this.joystickBase?.setPosition(this.joystick.originX,this.joystick.originY).setVisible(true);
-        this.joystickKnob?.setVisible(true);
+        Object.assign(base.style,{left:`${this.joystick.originX}px`,top:`${this.joystick.originY}px`,display:"block"});
+        knob.style.display="block";
       }
       const s=Math.min(1,R/(len||1));
-      this.joystickKnob?.setPosition(this.joystick.originX+ox*s,this.joystick.originY+oy*s);
+      Object.assign(knob.style,{left:`${this.joystick.originX+ox*s}px`,top:`${this.joystick.originY+oy*s}px`});
       // 小さな遊びを入れて、指のブレで向きが変わりすぎないようにする。
       const mag=Math.min(1,len/R);
       if(mag<.18){this.joystick.dx=0;this.joystick.dy=0;return;}
@@ -1586,8 +1601,8 @@ for(const race of usableRaces){
   }
 
   private hideJoystick(){
-    this.joystickBase?.setVisible(false);
-    this.joystickKnob?.setVisible(false);
+    if(this.joystickBase)this.joystickBase.style.display="none";
+    if(this.joystickKnob)this.joystickKnob.style.display="none";
   }
 
   private setMoveTarget(x:number,y:number){
@@ -1713,10 +1728,14 @@ const IS_MOBILE =
 
 // スマホでは画面1pxをワールド1pxとして表示し、カメラがプレイヤーを追う。
 // 画面がマップ(1536x864)より大きい方向だけ拡大して、マップ外が見えないようにする。
+// 高精細画面では端末の画素密度（最大2倍）で描画し、カメラをその倍率でズームする。
+// 見える範囲は同じまま、名札・吹き出しの文字やドット絵がつぶれずに表示される。
+const RENDER_ZOOM = IS_MOBILE ? Math.min(2, Math.max(1, window.devicePixelRatio || 1)) : 1;
+
 function mobileGameSize() {
   const w=Math.max(1,window.innerWidth), h=Math.max(1,window.innerHeight);
   const s=Math.max(1,w/1536,h/864);
-  return { width:Math.round(w/s), height:Math.round(h/s) };
+  return { width:Math.round(w/s*RENDER_ZOOM), height:Math.round(h/s*RENDER_ZOOM) };
 }
 
 if(IS_MOBILE) document.documentElement.classList.add("mobile");
