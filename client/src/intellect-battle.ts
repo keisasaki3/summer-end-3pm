@@ -22,7 +22,7 @@ type BookEntry = {
 };
 
 const BOOK_KEY = "summer-end-3pm-question-book";
-const MAX_HEARTS = 3;
+export const MAX_HEARTS = 3;
 
 const gcd = (a:number,b:number):number => b===0 ? Math.abs(a) : gcd(b,a%b);
 const rand = (min:number,max:number) => min+Math.floor(Math.random()*(max-min+1));
@@ -112,7 +112,10 @@ function pickWeakQuestion(excludeId:string): Question | undefined {
   return { id, topic:e.topic, prompt:e.prompt, choices, answerIndex, explain:e.explain };
 }
 
-type Enemy = { name:string; question:Question; weak:boolean };
+// キメラのハート（β0.62 は全員2つ。正解1回でハート1つ減る）
+const ENEMY_HEARTS=2;
+
+type Enemy = { name:string; question:Question; weak:boolean; hearts:number };
 
 function el<K extends keyof HTMLElementTagNameMap>(tag:K, className="", text="") {
   const e=document.createElement(tag);
@@ -124,9 +127,9 @@ function el<K extends keyof HTMLElementTagNameMap>(tag:K, className="", text="")
 // 戦闘画面。onEnd("win") で勝利、onEnd("lose") でハートが0になった。
 export function openBattle(enemyName:string, onEnd:(result:"win"|"lose")=>void) {
   const first=makeFractionQuestion();
-  const enemies:Enemy[]=[{ name:enemyName, question:first, weak:false }];
+  const enemies:Enemy[]=[{ name:enemyName, question:first, weak:false, hearts:ENEMY_HEARTS }];
   const weakQ=pickWeakQuestion(first.id);
-  if(weakQ) enemies.push({ name:`苦手な${enemyName}`, question:weakQ, weak:true });
+  if(weakQ) enemies.push({ name:`苦手な${enemyName}`, question:weakQ, weak:true, hearts:ENEMY_HEARTS });
   let hearts=MAX_HEARTS;
   let locked=false;
 
@@ -153,7 +156,7 @@ export function openBattle(enemyName:string, onEnd:(result:"win"|"lose")=>void) 
 
   const close=(result:"win"|"lose")=>{ overlay.remove(); onEnd(result); };
   const renderHearts=()=>{ heartRow.textContent="♥".repeat(hearts)+"♡".repeat(MAX_HEARTS-hearts); };
-  const renderEnemies=()=>{ enemyRow.textContent=enemies.map(e=>e.name).join("　"); };
+  const renderEnemies=()=>{ enemyRow.textContent=enemies.map(e=>`${e.name} ${"♥".repeat(e.hearts)}`).join("　"); };
 
   let afterNext:()=>void=()=>{};
   const showNext=(fn:()=>void)=>{ afterNext=fn; nextBtn.style.display=""; unknownBtn.style.display="none"; };
@@ -199,7 +202,12 @@ export function openBattle(enemyName:string, onEnd:(result:"win"|"lose")=>void) 
     lockChoices(q.answerIndex,i);
     if(i===q.answerIndex){
       record(q,"solved");
-      defeat("正解！ ");
+      enemy.hearts--;
+      if(enemy.hearts<=0){ defeat("正解！ "); return; }
+      renderEnemies();
+      message.textContent=`正解！ ${enemy.name}のハートが1つ減った。`;
+      enemy.question=makeFractionQuestion();
+      showNext(ask);
       return;
     }
     record(q,"wrong");
