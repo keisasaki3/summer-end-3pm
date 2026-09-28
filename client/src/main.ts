@@ -216,7 +216,7 @@ class WalkScene extends Phaser.Scene {
   create() {
     this.installInputIsolation();
     this.cameras.main.setBackgroundColor("#c88f72");
-    this.cameras.main.setZoom(RENDER_ZOOM);
+    this.cameras.main.setZoom(VIEW.zoom);
     this.setupImageField();
     this.makeChimeraTexture();
 
@@ -277,9 +277,9 @@ class WalkScene extends Phaser.Scene {
     visual.setScale(height);
 
     const name=this.add.text(0,-88*height,label,{
-      fontFamily:this.uiTheme.font,fontSize:"12px",color:this.uiTheme.nameFg,
+      fontFamily:this.uiTheme.font,fontSize:"13px",color:this.uiTheme.nameFg,
       backgroundColor:this.uiTheme.nameBg,padding:{x:7,y:3}
-    }).setOrigin(.5).setResolution(2);
+    }).setOrigin(.5).setResolution(VIEW.textRes);
 
     const statusIcon=this.add.image(0,-88*height,`status-${status}`);
     const c=this.add.container(x,y,[visual,name,statusIcon]).setDepth(10);
@@ -394,7 +394,7 @@ class WalkScene extends Phaser.Scene {
       padding: { x: 11, y: 7 },
       wordWrap: { width: 220, useAdvancedWrap: true },
       align: "center"
-    }).setOrigin(0.5, 1).setResolution(2);
+    }).setOrigin(0.5, 1).setResolution(VIEW.textRes);
 
     // 角丸の吹き出し＋しっぽ
     const bw = label.width, bh = label.height, top = label.y - bh;
@@ -1490,10 +1490,17 @@ for(const race of usableRaces){
     void document.fonts?.load(`11px ${this.uiTheme.font}`).then(()=>this.refreshNameTags()).catch(()=>{});
   }
 
+  // 画面サイズが変わったとき、カメラ倍率と文字の解像度を合わせ直す。
+  applyView() {
+    this.cameras.main.setZoom(VIEW.zoom);
+    this.refreshNameTags();
+  }
+
   private refreshNameTags() {
     const players=[this.me,...this.others.values()].filter(Boolean) as Phaser.GameObjects.Container[];
     for(const c of players){
       const nameText=c.getData("nameText") as Phaser.GameObjects.Text | undefined;
+      nameText?.setResolution(VIEW.textRes);
       nameText?.setStyle({fontFamily:this.uiTheme.font,color:this.uiTheme.nameFg,backgroundColor:this.uiTheme.nameBg});
       this.placeStatusIcon(c,this.normalizeStatus(c.getData("status")));
     }
@@ -1818,53 +1825,51 @@ for(const race of usableRaces){
   }
 }
 
-// スマホ（タッチ操作かつ短辺600px以下）は画面サイズに合わせた専用表示にする。
-// PCは従来どおり1280x720固定。
+// PC・スマホとも画面いっぱいに表示し、カメラがプレイヤーを追う。
+// スマホ（タッチ操作かつ短辺600px以下）は画面1px＝ワールド1px（狭い範囲を映す）。
+// PCはおおむね1280x720相当の範囲が見えるよう、ウィンドウの大きさに合わせて拡大する。
+// どちらもマップ(1536x864)の外が見えないよう、必要なら拡大する。
 const IS_MOBILE =
   window.matchMedia("(pointer: coarse)").matches &&
   Math.min(window.innerWidth, window.innerHeight) <= 600;
 
-// スマホでは画面1pxをワールド1pxとして表示し、カメラがプレイヤーを追う。
-// 画面がマップ(1536x864)より大きい方向だけ拡大して、マップ外が見えないようにする。
-// 高精細画面では端末の画素密度（最大2倍）で描画し、カメラをその倍率でズームする。
-// 見える範囲は同じまま、名札・吹き出しの文字やドット絵がつぶれずに表示される。
-const RENDER_ZOOM = IS_MOBILE ? Math.min(2, Math.max(1, window.devicePixelRatio || 1)) : 1;
+type ViewInfo = { width:number; height:number; zoom:number; textRes:number };
 
-function mobileGameSize() {
+function computeView():ViewInfo {
   const w=Math.max(1,window.innerWidth), h=Math.max(1,window.innerHeight);
-  const s=Math.max(1,w/1536,h/864);
-  return { width:Math.round(w/s*RENDER_ZOOM), height:Math.round(h/s*RENDER_ZOOM) };
+  const fit=Math.max(w/1536,h/864);
+  const k=IS_MOBILE ? Math.max(1,fit) : Math.max(Math.min(w/1280,h/720),fit);
+  // 高精細画面では2倍で描画する（大きすぎるキャンバスは重いので上限あり）。
+  const z=(window.devicePixelRatio||1)>1 && w*h<=2400000 ? 2 : 1;
+  const zoom=k*z;
+  // 文字は表示倍率以上の解像度で描く（低いと拡大でかすれ、pixelArtで縮小すると線が抜ける）。
+  return { width:Math.round(w*z), height:Math.round(h*z), zoom, textRes:Math.min(4,Math.max(1,Math.ceil(zoom))) };
 }
 
+let VIEW=computeView();
 if(IS_MOBILE) document.documentElement.classList.add("mobile");
-const gameSize=IS_MOBILE ? mobileGameSize() : { width:1280, height:720 };
 
 const game=new Phaser.Game({
   type:Phaser.AUTO,
   parent:"app",
-  width:gameSize.width,
-  height:gameSize.height,
+  width:VIEW.width,
+  height:VIEW.height,
   backgroundColor:"#0d0d0d",
   scene:WalkScene,
-  scale:IS_MOBILE ? {
+  scale:{
     mode:Phaser.Scale.FIT,
     autoCenter:Phaser.Scale.CENTER_BOTH,
-    width:gameSize.width,
-    height:gameSize.height
-  } : {
-    mode:Phaser.Scale.NONE,
-    autoCenter:Phaser.Scale.NO_CENTER,
-    width:1280,
-    height:720
+    width:VIEW.width,
+    height:VIEW.height
   },
   render:{pixelArt:true,antialias:false}
 });
 
-if(IS_MOBILE){
-  const resizeGame=()=>{
-    const next=mobileGameSize();
-    game.scale.resize(next.width,next.height);
-  };
-  window.addEventListener("resize",resizeGame);
-  window.addEventListener("orientationchange",()=>setTimeout(resizeGame,200));
-}
+const resizeGame=()=>{
+  VIEW=computeView();
+  game.scale.resize(VIEW.width,VIEW.height);
+  const scene=game.scene.getScenes(true)[0] as WalkScene | undefined;
+  scene?.applyView();
+};
+window.addEventListener("resize",resizeGame);
+window.addEventListener("orientationchange",()=>setTimeout(resizeGame,200));
