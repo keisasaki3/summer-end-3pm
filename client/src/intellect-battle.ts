@@ -22,7 +22,6 @@ type BookEntry = {
 };
 
 const BOOK_KEY = "summer-end-3pm-question-book";
-const QUESTION_SECONDS = 15;
 const MAX_HEARTS = 3;
 
 const gcd = (a:number,b:number):number => b===0 ? Math.abs(a) : gcd(b,a%b);
@@ -129,8 +128,6 @@ export function openBattle(enemyName:string, onEnd:(result:"win"|"lose")=>void) 
   const weakQ=pickWeakQuestion(first.id);
   if(weakQ) enemies.push({ name:`苦手な${enemyName}`, question:weakQ, weak:true });
   let hearts=MAX_HEARTS;
-  let timer=0;
-  let deadline=0;
   let locked=false;
 
   const overlay=el("div","se-overlay se-battle");
@@ -141,9 +138,6 @@ export function openBattle(enemyName:string, onEnd:(result:"win"|"lose")=>void) 
   const heartRow=el("div","se-battle-hearts");
   const book=el("div","se-battle-enemies",`魔法書：${first.topic}`);
   const enemyRow=el("div","se-battle-enemies");
-  const bar=el("div","se-battle-bar");
-  const barFill=el("div","se-battle-bar-fill");
-  bar.appendChild(barFill);
   const prompt=el("div","se-battle-prompt");
   const choiceBox=el("div","se-battle-choices");
   const message=el("div","se-message se-battle-message");
@@ -153,11 +147,11 @@ export function openBattle(enemyName:string, onEnd:(result:"win"|"lose")=>void) 
   const nextBtn=el("button","se-btn is-primary","つぎへ");
   nextBtn.type="button";
   actions.append(unknownBtn,nextBtn);
-  card.append(head,book,heartRow,enemyRow,bar,prompt,choiceBox,message,actions);
+  card.append(head,book,heartRow,enemyRow,prompt,choiceBox,message,actions);
   overlay.appendChild(card);
   document.body.appendChild(overlay);
 
-  const close=(result:"win"|"lose")=>{ window.clearInterval(timer); overlay.remove(); onEnd(result); };
+  const close=(result:"win"|"lose")=>{ overlay.remove(); onEnd(result); };
   const renderHearts=()=>{ heartRow.textContent="♥".repeat(hearts)+"♡".repeat(MAX_HEARTS-hearts); };
   const renderEnemies=()=>{ enemyRow.textContent=enemies.map(e=>e.name).join("　"); };
 
@@ -179,17 +173,9 @@ export function openBattle(enemyName:string, onEnd:(result:"win"|"lose")=>void) 
       b.addEventListener("click",()=>answer(i));
       return b;
     }));
-    deadline=performance.now()+QUESTION_SECONDS*1000;
-    window.clearInterval(timer);
-    timer=window.setInterval(()=>{
-      const left=Math.max(0,deadline-performance.now());
-      barFill.style.width=`${left/(QUESTION_SECONDS*10)}%`;
-      if(left<=0) answer(-1);
-    },100);
   };
 
   const lockChoices=(correct:number,picked:number)=>{
-    window.clearInterval(timer);
     locked=true;
     [...choiceBox.children].forEach((b,i)=>{
       const btn=b as HTMLButtonElement;
@@ -219,7 +205,7 @@ export function openBattle(enemyName:string, onEnd:(result:"win"|"lose")=>void) 
     record(q,"wrong");
     hearts--;
     renderHearts();
-    message.textContent=`${i<0 ? "時間切れ！" : "ちがう！"} ハートが1つ減った。`;
+    message.textContent="ちがう！ ハートが1つ減った。";
     if(hearts<=0){
       message.textContent+=" 力尽きた…町に戻される。";
       showNext(()=>close("lose"));
