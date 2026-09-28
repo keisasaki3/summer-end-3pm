@@ -27,6 +27,9 @@ const SERVER_URL = isViteDev
   : `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}`;
 
 type MapId = "yunagicho" | "komorebi" | "convenience";
+
+// ソロバンハリネズミの出現位置（木漏れ日神社の境内の真ん中）
+const CHIMERA_HOME = { map:"komorebi" as MapId, x:880, y:600 };
 type Direction = "up" | "down" | "left" | "right";
 type MapAudioConfig = { bgmKey: string | null; ambienceKeys: string[] };
 type MapDefinition = { name: string; texture: string; audio: MapAudioConfig };
@@ -98,7 +101,7 @@ class WalkScene extends Phaser.Scene {
   // 知性バトル（最小版）: 夕凪町の堤防の上を戦闘地域とし、キメラ1体が歩き回る。
   private chimera?: Phaser.GameObjects.Container;
   private chimeraRespawnAt = 0;
-  private chimeraWander = { x:1440, y:290, until:0 };
+  private chimeraWander = { x:880, y:600, until:0 };
   private battleOpen = false;
   private background?: Phaser.GameObjects.Image;
   private mapTitle?: HTMLDivElement;
@@ -1756,7 +1759,7 @@ for(const race of usableRaces){
   }
 
   private spawnChimera() {
-    const c=this.add.container(1440,290);
+    const c=this.add.container(CHIMERA_HOME.x,CHIMERA_HOME.y);
     const img=this.add.image(0,-22,"chimera-soroban");
     const label=this.add.text(0,-60,"ソロバンハリネズミ",{fontFamily:this.uiTheme.font,fontSize:"11px",color:this.uiTheme.nameFg,backgroundColor:this.uiTheme.nameBg,padding:{x:4,y:1}}).setOrigin(.5);
     c.add([img,label]);
@@ -1766,7 +1769,7 @@ for(const race of usableRaces){
 
   private updateChimera(time:number,delta:number) {
     if(!this.me) return;
-    if(this.currentMap!=="yunagicho"){
+    if(this.currentMap!==CHIMERA_HOME.map){
       this.chimera?.destroy(true); this.chimera=undefined;
       return;
     }
@@ -1776,13 +1779,13 @@ for(const race of usableRaces){
     }
     const c=this.chimera;
     const px=this.me.x-c.x, py=this.me.y-c.y, pd=Math.hypot(px,py);
-    const home=Math.hypot(c.x-1440,c.y-290);
+    const home=Math.hypot(c.x-CHIMERA_HOME.x,c.y-CHIMERA_HOME.y);
     let tx=this.chimeraWander.x, ty=this.chimeraWander.y, speed=40;
     if(pd<240 && home<320){ tx=this.me.x; ty=this.me.y; speed=95; }
     else if(time>this.chimeraWander.until || Math.hypot(tx-c.x,ty-c.y)<4){
-      // 堤防の上（戦闘地域）の中で次の目的地を選ぶ
+      // 神社の境内の真ん中あたりで次の目的地を選ぶ
       for(let i=0;i<10;i++){
-        const nx=Phaser.Math.Between(1340,1500), ny=Phaser.Math.Between(270,320);
+        const nx=Phaser.Math.Between(CHIMERA_HOME.x-220,CHIMERA_HOME.x+220), ny=Phaser.Math.Between(CHIMERA_HOME.y-80,CHIMERA_HOME.y+80);
         if(!this.isBlocked(nx,ny)){ this.chimeraWander={x:nx,y:ny,until:time+Phaser.Math.Between(2000,4000)}; break; }
       }
       tx=this.chimeraWander.x; ty=this.chimeraWander.y;

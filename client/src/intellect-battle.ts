@@ -123,7 +123,7 @@ function normalizeKnowledgeQuestion(topic: SubjectTopic, raw: RawKnowledgeQuesti
 
 // 装備中のトピックから問題を1つ作る。実データが無い／読み込めない場合は undefined を返す（呼び出し側でフォールバック）。
 export async function makeQuestionForEquippedTopic(equipped: EquippedTopic): Promise<Question | undefined> {
-  if (equipped.topicId === "math-number-calculation-017") return makeFractionQuestion();
+  if (equipped.topicId === FRACTION_TOPIC_ID) return makeFractionQuestion();
   const topics = await loadSubjectTopics(equipped.subject);
   const topic = topics.find((t) => t.topic_id === equipped.topicId);
   if (!topic?.questions?.length) return undefined;
@@ -150,6 +150,25 @@ function record(q:Question, result:"solved"|"wrong"|"unknown") {
   e.lastSeen=Date.now();
   book[q.id]=e;
   saveBook(book);
+}
+
+// 魔法書（トピック）ごとの詠唱回数。1問答えるたびに1回（正解・不正解・わからん全部）
+const CAST_KEY = "summer-end-3pm-cast-count";
+const FRACTION_TOPIC_ID = "math-number-calculation-017";
+
+export function loadCastCounts(): Record<string, number> {
+  try {
+    const raw = JSON.parse(localStorage.getItem(CAST_KEY) || "{}");
+    return raw && typeof raw === "object" ? raw : {};
+  } catch {
+    return {};
+  }
+}
+
+function addCast(topicId: string) {
+  const counts = loadCastCounts();
+  counts[topicId] = (counts[topicId] || 0) + 1;
+  try { localStorage.setItem(CAST_KEY, JSON.stringify(counts)); } catch { /* 保存できなくても戦闘は続ける */ }
 }
 
 // キメラのハート（β0.62 は全員2つ。正解1回でハート1つ減る）
@@ -308,8 +327,11 @@ export async function openBattle(enemyName:string, onEnd:(result:"win"|"lose")=>
     choiceBox.querySelectorAll("input,button").forEach((x)=>((x as HTMLInputElement|HTMLButtonElement).disabled=true));
   };
 
+  const castOf=(q:Question)=>addCast(q.id.startsWith("frac:") ? FRACTION_TOPIC_ID : q.id.split(":")[0]);
+
   const resolveResult=async (correct:boolean)=>{
     const q=enemy.question;
+    castOf(q);
     if(correct){
       record(q,"solved");
       enemy.hearts--;
@@ -358,6 +380,7 @@ export async function openBattle(enemyName:string, onEnd:(result:"win"|"lose")=>
     const q=enemy.question;
     if(q.inputMode==="text") lockInput(false); else lockChoices(q.answerIndex,-1);
     record(q,"unknown");
+    castOf(q);
     showFeedback("info","こたえ",q,`${enemy.name}をたおした！`);
     showNext(()=>close("win"),"町へもどる");
   });
