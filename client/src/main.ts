@@ -1,5 +1,6 @@
 import Phaser from "phaser";
 import { GAME_TITLE } from "./branding";
+import { UI_THEMES, applyUiTheme, getUiTheme, type UiTheme, type UiThemeId } from "./ui-theme";
 import {
   ensureProfile,
   getCurrentSession,
@@ -61,7 +62,12 @@ class WalkScene extends Phaser.Scene {
   private positionUnsent = false;
   private replacedByNewerConnection = false;
 
-  private joystick = { active:false, pointerId:-1, originX:0, originY:0, dx:0, dy:0 };
+  // タッチ操作: どこでもドラッグで出るスティック / 短いタップでその場所へ歩く。
+  private joystick = { active:false, pointerId:-1, originX:0, originY:0, dx:0, dy:0, downAt:0, dragging:false };
+  private joystickBase?: Phaser.GameObjects.Arc;
+  private joystickKnob?: Phaser.GameObjects.Arc;
+  private moveTarget?: { x:number; y:number; lastProgressAt:number; lastDist:number };
+  private moveMarker?: Phaser.GameObjects.Arc;
   private chatInput?: HTMLInputElement;
   private chatLog?: HTMLDivElement;
   private chatLines: {name:string;text:string}[] = [];
@@ -70,7 +76,7 @@ class WalkScene extends Phaser.Scene {
     localStorage.getItem("summer-end-3pm-show-coords") ??
     localStorage.getItem("nantoka-show-coords") ??
     localStorage.getItem("vw-show-coords") ??
-    "1"
+    "0"
   ) !== "0";
   private playerName = "WALKER";
   private playerColor = 0x60a5fa;
@@ -91,6 +97,7 @@ class WalkScene extends Phaser.Scene {
   private transitionLock = false;
   private activeMapBgm?: Phaser.Sound.HTML5AudioSound;
   private activeMapAmbience: Phaser.Sound.HTML5AudioSound[] = [];
+  private uiTheme: UiTheme = getUiTheme();
   private masterVolume = Math.min(1, Math.max(0, Number(localStorage.getItem("summer-end-3pm-master-volume") ?? "1")));
 
   // 今後、環境音/BGMファイルを追加したらここへ key -> URL を登録する。
@@ -229,9 +236,11 @@ class WalkScene extends Phaser.Scene {
     this.setupCollisionMap();
 
     this.mapTitle=document.createElement("div");
-    this.mapTitle.className="se-glass se-hud-title";
+    this.mapTitle.className="se-plate se-hud-title";
     document.body.appendChild(this.mapTitle);
     this.updateMapTitle();
+    void document.fonts?.load(`11px ${this.uiTheme.font}`).catch(()=>{});
+    document.fonts?.addEventListener?.("loadingdone",()=>this.refreshNameTags());
   }
 
   private makePlayer(
@@ -256,8 +265,8 @@ class WalkScene extends Phaser.Scene {
     visual.setScale(height);
 
     const name=this.add.text(0,-88*height,this.playerLabel(label,status),{
-      fontFamily:'"Hiragino Maru Gothic ProN","Hiragino Sans","Noto Sans JP",sans-serif',fontSize:"11px",color:"#fff3e2",
-      backgroundColor:"#2a1a2699",padding:{x:7,y:3}
+      fontFamily:this.uiTheme.font,fontSize:"11px",color:this.uiTheme.nameFg,
+      backgroundColor:this.uiTheme.nameBg,padding:{x:7,y:3}
     }).setOrigin(.5).setResolution(2);
 
     const c=this.add.container(x,y,[visual,name]).setDepth(10);
@@ -363,9 +372,9 @@ class WalkScene extends Phaser.Scene {
 
     const h = Number(c.getData("height") || 1);
     const label = this.add.text(0, -106*h, safe, {
-      fontFamily: '"Hiragino Maru Gothic ProN","Hiragino Sans","Noto Sans JP",sans-serif',
+      fontFamily: this.uiTheme.font,
       fontSize: "14px",
-      color: "#3a2630",
+      color: this.uiTheme.bubbleFg,
       padding: { x: 11, y: 7 },
       wordWrap: { width: 220, useAdvancedWrap: true },
       align: "center"
@@ -373,12 +382,13 @@ class WalkScene extends Phaser.Scene {
 
     // 角丸の吹き出し＋しっぽ
     const bw = label.width, bh = label.height, top = label.y - bh;
+    const t = this.uiTheme, r = t.bubbleRadius;
     const bg = this.add.graphics();
-    bg.fillStyle(0x2a1a1e, .18).fillRoundedRect(-bw/2 + 1, top + 3, bw, bh, 12);
-    bg.fillStyle(0xfff6ea, .97).fillRoundedRect(-bw/2, top, bw, bh, 12);
-    bg.lineStyle(1.5, 0xf4a66a, .9).strokeRoundedRect(-bw/2, top, bw, bh, 12);
-    bg.fillStyle(0xfff6ea, .97).fillTriangle(-6, label.y - 1, 6, label.y - 1, 0, label.y + 7);
-    bg.lineStyle(1.5, 0xf4a66a, .9).lineBetween(-6, label.y, 0, label.y + 7).lineBetween(6, label.y, 0, label.y + 7);
+    bg.fillStyle(0x000000, .18).fillRoundedRect(-bw/2 + 2, top + 3, bw, bh, r);
+    bg.fillStyle(t.bubbleBg, .97).fillRoundedRect(-bw/2, top, bw, bh, r);
+    bg.lineStyle(1.5, t.bubbleStroke, 1).strokeRoundedRect(-bw/2, top, bw, bh, r);
+    bg.fillStyle(t.bubbleBg, .97).fillTriangle(-6, label.y - 1, 6, label.y - 1, 0, label.y + 7);
+    bg.lineStyle(1.5, t.bubbleStroke, 1).lineBetween(-6, label.y, 0, label.y + 7).lineBetween(6, label.y, 0, label.y + 7);
 
     const bubble = this.add.container(0, 0, [bg, label]);
     c.add(bubble);
@@ -704,7 +714,7 @@ for(const race of usableRaces){
 
   private setupChatLog() {
     const log=document.createElement("div");
-    log.className="se-glass se-chatlog";
+    log.className="se-plate se-chatlog";
     document.body.appendChild(log);
     this.chatLog=log;
     this.renderChatLog();
@@ -743,7 +753,7 @@ for(const race of usableRaces){
     input.maxLength = 80;
     input.placeholder = "Speak into the evening...";
     input.autocomplete = "off";
-    input.className = "se-glass se-chat-input";
+    input.className = "se-plate se-chat-input";
 
     const disableGameKeys = () => {
       this.chatLog?.classList.add("is-active");
@@ -754,6 +764,8 @@ for(const race of usableRaces){
       this.joystick.active = false;
       this.joystick.dx = 0;
       this.joystick.dy = 0;
+      this.hideJoystick();
+      this.clearMoveTarget();
     };
 
     const enableGameKeys = () => {
@@ -1270,7 +1282,7 @@ for(const race of usableRaces){
 
   private setupOptions() {
     const coordHud=document.createElement("div");
-    coordHud.className="se-glass se-coord";
+    coordHud.className="se-plate se-coord";
     document.body.appendChild(coordHud);
     this.coordHud=coordHud;
     coordHud.style.display=this.coordsVisible ? "block" : "none";
@@ -1278,7 +1290,7 @@ for(const race of usableRaces){
     const button=document.createElement("button");
     button.type="button";
     button.title="Options";
-    button.className="se-glass se-icon-btn";
+    button.className="se-plate se-icon-btn";
     button.innerHTML='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>';
     document.body.appendChild(button);
 
@@ -1298,7 +1310,21 @@ for(const race of usableRaces){
     const coordsText=document.createElement("span");
     coordsText.textContent="座標を表示";
     coordsLabel.append(coordsText,coords);
-    box.append(heading,coordsLabel);
+
+    const themeLabel=document.createElement("label");
+    themeLabel.className="se-label";
+    themeLabel.textContent="デザイン";
+    themeLabel.style.marginTop="14px";
+    const themeSelect=document.createElement("select");
+    themeSelect.className="se-field";
+    themeSelect.style.marginBottom="0";
+    for(const theme of UI_THEMES){
+      const option=document.createElement("option");
+      option.value=theme.id;option.textContent=`${theme.id}　${theme.label}`;themeSelect.appendChild(option);
+    }
+    themeSelect.value=this.uiTheme.id;
+    themeSelect.addEventListener("change",()=>this.setUiTheme(themeSelect.value as UiThemeId));
+    box.append(heading,themeLabel,themeSelect,coordsLabel);
 
     const volumeLabel=document.createElement("label");
     volumeLabel.className="se-volume-head";
@@ -1425,6 +1451,7 @@ for(const race of usableRaces){
     document.body.appendChild(panel);
 
     const sync=()=>{
+      themeSelect.value=this.uiTheme.id;
       coords.checked=this.coordsVisible;
       if(statusSelect)statusSelect.value=this.presenceStatus;
     };
@@ -1437,6 +1464,21 @@ for(const race of usableRaces){
     closeButton.addEventListener("click",close);
     button.addEventListener("click",()=>{sync();panel.style.display="flex";});
     panel.addEventListener("click",(event)=>{if(event.target===panel)close();});
+  }
+
+  private setUiTheme(id:UiThemeId) {
+    this.uiTheme=applyUiTheme(id);
+    this.refreshNameTags();
+    // Webフォントの読み込みが終わったら、キャンバス上の名札を描き直す。
+    void document.fonts?.load(`11px ${this.uiTheme.font}`).then(()=>this.refreshNameTags()).catch(()=>{});
+  }
+
+  private refreshNameTags() {
+    const players=[this.me,...this.others.values()].filter(Boolean) as Phaser.GameObjects.Container[];
+    for(const c of players){
+      const nameText=c.getData("nameText") as Phaser.GameObjects.Text | undefined;
+      nameText?.setStyle({fontFamily:this.uiTheme.font,color:this.uiTheme.nameFg,backgroundColor:this.uiTheme.nameBg});
+    }
   }
 
   private updateMapTitle() {
@@ -1459,6 +1501,7 @@ for(const race of usableRaces){
   private switchMap(map:MapId, x:number, y:number) {
     if(this.transitionLock || !this.me) return;
     this.transitionLock=true;
+    this.clearMoveTarget();
     this.currentMap=map;
     const data=this.mapData[map];
     this.background?.setTexture(data.texture);
@@ -1505,22 +1548,58 @@ for(const race of usableRaces){
   }
 
   private setupTouchControls(){
+    const R=52, DRAG_START=10;
+    this.joystickBase=this.add.circle(0,0,R,0x000000,.22).setStrokeStyle(2,0xffffff,.55).setScrollFactor(0).setDepth(3000).setVisible(false);
+    this.joystickKnob=this.add.circle(0,0,22,0xffffff,.7).setScrollFactor(0).setDepth(3001).setVisible(false);
+    this.moveMarker=this.add.circle(0,0,9,0xffffff,0).setStrokeStyle(2,0xffffff,.9).setDepth(5).setVisible(false);
+    this.input.addPointer(1);
+
     this.input.on("pointerdown",(p:Phaser.Input.Pointer)=>{
-      if(p.x>this.scale.width*.65)return;
-      Object.assign(this.joystick,{active:true,pointerId:p.id,originX:p.x,originY:p.y,dx:0,dy:0});
+      if(this.loginOpen || this.joystick.active)return;
+      Object.assign(this.joystick,{active:true,pointerId:p.id,originX:p.x,originY:p.y,dx:0,dy:0,downAt:performance.now(),dragging:false});
     });
     this.input.on("pointermove",(p:Phaser.Input.Pointer)=>{
       if(!this.joystick.active||p.id!==this.joystick.pointerId)return;
-      const dx=p.x-this.joystick.originX,dy=p.y-this.joystick.originY,len=Math.hypot(dx,dy)||1,max=58,s=Math.min(1,max/len);
-      this.joystick.dx=dx*s/max;this.joystick.dy=dy*s/max;
+      const ox=p.x-this.joystick.originX, oy=p.y-this.joystick.originY, len=Math.hypot(ox,oy);
+      if(!this.joystick.dragging){
+        if(len<DRAG_START)return;
+        this.joystick.dragging=true;
+        this.clearMoveTarget();
+        this.joystickBase?.setPosition(this.joystick.originX,this.joystick.originY).setVisible(true);
+        this.joystickKnob?.setVisible(true);
+      }
+      const s=Math.min(1,R/(len||1));
+      this.joystickKnob?.setPosition(this.joystick.originX+ox*s,this.joystick.originY+oy*s);
+      // 小さな遊びを入れて、指のブレで向きが変わりすぎないようにする。
+      const mag=Math.min(1,len/R);
+      if(mag<.18){this.joystick.dx=0;this.joystick.dy=0;return;}
+      this.joystick.dx=ox/(len||1);this.joystick.dy=oy/(len||1);
     });
     const release=(p:Phaser.Input.Pointer)=>{
-      if(p.id!==this.joystick.pointerId)return;
-      this.joystick.active=false;this.joystick.dx=0;this.joystick.dy=0;
+      if(!this.joystick.active||p.id!==this.joystick.pointerId)return;
+      const tapped=!this.joystick.dragging && performance.now()-this.joystick.downAt<350;
+      this.joystick.active=false;this.joystick.dx=0;this.joystick.dy=0;this.joystick.dragging=false;
+      this.hideJoystick();
+      if(tapped && this.me && !this.loginOpen) this.setMoveTarget(p.worldX,p.worldY);
     };
     this.input.on("pointerup",release);this.input.on("pointerupoutside",release);
   }
 
+  private hideJoystick(){
+    this.joystickBase?.setVisible(false);
+    this.joystickKnob?.setVisible(false);
+  }
+
+  private setMoveTarget(x:number,y:number){
+    const tx=Phaser.Math.Clamp(x,16,1520), ty=Phaser.Math.Clamp(y,80,848);
+    this.moveTarget={x:tx,y:ty,lastProgressAt:performance.now(),lastDist:Infinity};
+    this.moveMarker?.setPosition(tx,ty).setVisible(true).setAlpha(1).setScale(1);
+  }
+
+  private clearMoveTarget(){
+    this.moveTarget=undefined;
+    this.moveMarker?.setVisible(false);
+  }
 
   private isDomEditing() {
     const el=document.activeElement as HTMLElement | null;
@@ -1570,6 +1649,22 @@ for(const race of usableRaces){
       if(this.cursors?.down.isDown||this.keys?.S?.isDown)dy++;
       dx+=this.joystick.dx;
       dy+=this.joystick.dy;
+      if(dx!==0 || dy!==0) this.clearMoveTarget();
+      else if(this.moveTarget){
+        // タップした場所へ歩く。着いたら止まり、壁などで進めなくなったら諦める。
+        const tx=this.moveTarget.x-this.me.x, ty=this.moveTarget.y-this.me.y, dist=Math.hypot(tx,ty);
+        const now=performance.now();
+        if(dist<6) this.clearMoveTarget();
+        else{
+          if(dist<this.moveTarget.lastDist-1){this.moveTarget.lastDist=dist;this.moveTarget.lastProgressAt=now;}
+          if(now-this.moveTarget.lastProgressAt>400) this.clearMoveTarget();
+          else{dx=tx/dist;dy=ty/dist;}
+        }
+      }
+    }
+    if(this.moveMarker?.visible){
+      const pulse=(Math.sin(time/160)+1)/2;
+      this.moveMarker.setScale(.85+pulse*.3).setAlpha(.6+pulse*.4);
     }
 
     const len=Math.hypot(dx,dy),moving=len>0;
