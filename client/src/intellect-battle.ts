@@ -239,7 +239,7 @@ export function openQuestionBook() {
   Object.assign(overlay.style,{display:"flex",zIndex:"16000"});
   const card=el("div","se-card");
   card.style.maxWidth="440px";
-  const head=el("div","se-heading","問題図鑑");
+  const head=el("div","se-heading","図鑑");
   const list=el("div","se-book-list");
   if(entries.length===0) list.appendChild(el("div","se-message","まだ問題に出会っていない。"));
   for(const e of entries){
