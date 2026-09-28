@@ -4,7 +4,7 @@
 // 「ちゃんと実装したトピックだけ遊ばせる」方針（Keita 2026-09-28）により、
 // 装備画面（status-window.ts）側でも quiz-data.ts の出題可能判定を使って選べるトピックを絞っている。
 
-import { getPlayableTopicIds, loadSubjectTopics, type KnowledgeTopic, type RawKnowledgeQuestion } from "./quiz-data";
+import { getPlayableTopicIds, loadSubjectTopics, type SubjectTopic, type RawKnowledgeQuestion } from "./quiz-data";
 
 export type Question = {
   id: string;
@@ -16,6 +16,7 @@ export type Question = {
   // 数字入力・並べ替え型の問題は選択肢ではなく文字入力で答える
   inputMode?: "text";
   expectedAnswer?: string;
+  accept?: string[];
 };
 
 export type EquippedTopic = { subject: string; topicId: string; topicName: string };
@@ -96,9 +97,9 @@ export function makeFractionQuestion(): Question {
 }
 
 // quiz-data.ts の生データ（knowledge型）を実際のQuestionに変換する。
-// 4択は選択肢の並びをシャッフルして正解位置を固定化しない。○×もランダムに並べる。
+// 4択は選択肢の並びをシャッフルして正解位置を固定化しない。○×は常に ○ → × の順。
 // 数字入力・並べ替えは選択肢ではなく文字入力で答える形にする。
-function normalizeKnowledgeQuestion(topic: KnowledgeTopic, raw: RawKnowledgeQuestion): Question {
+function normalizeKnowledgeQuestion(topic: SubjectTopic, raw: RawKnowledgeQuestion): Question {
   const id = `${topic.topic_id}:${raw.id}`;
   if (raw.format === "4択" && Array.isArray(raw.options)) {
     const options = raw.options;
@@ -110,14 +111,14 @@ function normalizeKnowledgeQuestion(topic: KnowledgeTopic, raw: RawKnowledgeQues
   }
   if (raw.format === "○×") {
     const isTrue = raw.answer as boolean;
-    const choices = Math.random() < 0.5 ? ["○", "×"] : ["×", "○"];
+    const choices = ["○", "×"];
     const answerIndex = choices.indexOf(isTrue ? "○" : "×");
     return { id, topic: topic.topic, prompt: raw.prompt, choices, answerIndex, explain: raw.explain };
   }
   // 数字入力・並べ替え
   const expected = Array.isArray(raw.answer) ? raw.answer.join(",") : String(raw.answer);
   return { id, topic: topic.topic, prompt: raw.prompt, choices: [], answerIndex: -1, explain: raw.explain,
-    inputMode: "text", expectedAnswer: expected };
+    inputMode: "text", expectedAnswer: expected, accept: raw.accept };
 }
 
 // 装備中のトピックから問題を1つ作る。実データが無い／読み込めない場合は undefined を返す（呼び出し側でフォールバック）。
@@ -125,7 +126,7 @@ export async function makeQuestionForEquippedTopic(equipped: EquippedTopic): Pro
   if (equipped.topicId === "math-number-calculation-017") return makeFractionQuestion();
   const topics = await loadSubjectTopics(equipped.subject);
   const topic = topics.find((t) => t.topic_id === equipped.topicId);
-  if (!topic || topic.type !== "knowledge" || topic.questions.length === 0) return undefined;
+  if (!topic?.questions?.length) return undefined;
   const raw = topic.questions[rand(0, topic.questions.length - 1)];
   return normalizeKnowledgeQuestion(topic, raw);
 }
@@ -151,24 +152,15 @@ function record(q:Question, result:"solved"|"wrong"|"unknown") {
   saveBook(book);
 }
 
-// 苦手枠: 間違えた・わからんだった問題から1つ（4択・○×型は選択肢を作り直す。数字入力型はそのまま再出題）
-function pickWeakQuestion(excludeId:string): Question | undefined {
-  const book=loadBook();
-  const weak=Object.entries(book).filter(([id,e])=>e.weak && id!==excludeId);
-  if(weak.length===0) return undefined;
-  const [id,e]=weak[rand(0,weak.length-1)];
-  if(e.inputMode==="text"){
-    return { id, topic:e.topic, prompt:e.prompt, choices:[], answerIndex:-1, explain:e.explain, inputMode:"text", expectedAnswer:e.answer };
-  }
-  const others=Object.values(book).map(x=>x.answer).filter(a=>a!==e.answer);
-  const {choices,answerIndex}=buildChoices(e.answer,others.sort(()=>Math.random()-.5));
-  return { id, topic:e.topic, prompt:e.prompt, choices, answerIndex, explain:e.explain };
-}
-
 // キメラのハート（β0.62 は全員2つ。正解1回でハート1つ減る）
 const ENEMY_HEARTS=2;
 
-type Enemy = { name:string; question:Question; weak:boolean; hearts:number };
+type Enemy = { name:string; question:Question; hearts:number };
+
+// 全角数字・全角記号・空白の揺れを吸収して比べる
+function normalizeAnswer(s:string) {
+  return s.normalize("NFKC").replace(/[−–ー]/g,"-").replace(/\s+/g,"");
+}
 
 function el<K extends keyof HTMLElementTagNameMap>(tag:K, className="", text="") {
   const e=document.createElement(tag);
@@ -188,68 +180,111 @@ export async function openBattle(enemyName:string, onEnd:(result:"win"|"lose")=>
     return makeFractionQuestion();
   };
 
-  const first=await nextQuestion();
-  const enemies:Enemy[]=[{ name:enemyName, question:first, weak:false, hearts:ENEMY_HEARTS }];
-  const weakQ=pickWeakQuestion(first.id);
-  if(weakQ) enemies.push({ name:`苦手な${enemyName}`, question:weakQ, weak:true, hearts:ENEMY_HEARTS });
+  const enemy:Enemy={ name:enemyName, question:await nextQuestion(), hearts:ENEMY_HEARTS };
   let hearts=MAX_HEARTS;
   let locked=false;
+  let count=0;
 
   const overlay=el("div","se-overlay se-battle");
   Object.assign(overlay.style,{display:"flex",zIndex:"16000"});
-  const card=el("div","se-card");
-  card.style.maxWidth="420px";
-  const head=el("div","se-heading");
-  const heartRow=el("div","se-battle-hearts");
-  const book=el("div","se-battle-enemies",`魔法書：${first.topic}`);
-  const enemyRow=el("div","se-battle-enemies");
+  const card=el("div","se-card se-battle-card");
+
+  const top=el("div","se-battle-top");
+  const foe=el("div","se-battle-side");
+  const foeName=el("div","se-battle-name",enemy.name);
+  const foeHearts=el("div","se-battle-hearts is-foe");
+  foe.append(el("div","se-battle-label","てき"),foeName,foeHearts);
+  const me=el("div","se-battle-side is-me");
+  const myHearts=el("div","se-battle-hearts");
+  me.append(el("div","se-battle-label","あなた"),myHearts);
+  top.append(foe,me);
+
+  const meta=el("div","se-battle-meta");
+  const bookChip=el("div","se-battle-book");
+  const counter=el("div","se-battle-count");
+  meta.append(bookChip,counter);
+
+  const panel=el("div","se-battle-panel");
   const prompt=el("div","se-battle-prompt");
+  panel.append(prompt);
+
   const choiceBox=el("div","se-battle-choices");
-  const message=el("div","se-message se-battle-message");
-  const actions=el("div","se-actions");
+  const feedback=el("div","se-battle-feedback");
+  const actions=el("div","se-actions se-battle-actions");
   const unknownBtn=el("button","se-btn","わからん");
   unknownBtn.type="button";
   const nextBtn=el("button","se-btn is-primary","つぎへ");
   nextBtn.type="button";
   actions.append(unknownBtn,nextBtn);
-  card.append(head,book,heartRow,enemyRow,prompt,choiceBox,message,actions);
+  card.append(top,meta,panel,choiceBox,feedback,actions);
   overlay.appendChild(card);
   document.body.appendChild(overlay);
 
-  const close=(result:"win"|"lose")=>{ overlay.remove(); onEnd(result); };
-  const renderHearts=()=>{ heartRow.textContent="♥".repeat(hearts)+"♡".repeat(MAX_HEARTS-hearts); };
-  const renderEnemies=()=>{ enemyRow.textContent=enemies.map(e=>`${e.name} ${"♥".repeat(e.hearts)}`).join("　"); };
+  const onKey=(ev:KeyboardEvent)=>{
+    if(nextBtn.style.display!=="none" && (ev.key==="Enter" || ev.key===" ")){ ev.preventDefault(); afterNext(); return; }
+    if(!locked && enemy.question.inputMode!=="text" && /^[1-4]$/.test(ev.key)){
+      const i=Number(ev.key)-1;
+      if(i<enemy.question.choices.length) answer(i);
+    }
+  };
+  window.addEventListener("keydown",onKey);
+  const close=(result:"win"|"lose")=>{ window.removeEventListener("keydown",onKey); overlay.remove(); onEnd(result); };
+  const renderHearts=()=>{
+    myHearts.textContent="♥".repeat(hearts)+"♡".repeat(MAX_HEARTS-hearts);
+    foeHearts.textContent="♥".repeat(enemy.hearts)+"♡".repeat(ENEMY_HEARTS-enemy.hearts);
+  };
 
   let afterNext:()=>void=()=>{};
-  const showNext=(fn:()=>void)=>{ afterNext=fn; nextBtn.style.display=""; unknownBtn.style.display="none"; };
+  const showNext=(fn:()=>void,label="つぎへ")=>{
+    afterNext=fn; nextBtn.textContent=label; nextBtn.style.display=""; unknownBtn.style.display="none";
+    setTimeout(()=>nextBtn.focus(),0);
+  };
   nextBtn.addEventListener("click",()=>afterNext());
 
+  const showFeedback=(kind:"good"|"bad"|"info", verdict:string, q:Question, extra:string)=>{
+    feedback.className=`se-battle-feedback is-${kind}`;
+    const answerLabel=q.inputMode==="text" ? (q.expectedAnswer ?? "") : q.choices[q.answerIndex];
+    feedback.replaceChildren(
+      el("div","se-battle-verdict",verdict),
+      el("div","se-battle-answer",`正解：${answerLabel}`),
+      el("div","se-battle-explain",q.explain),
+      ...(extra ? [el("div","se-battle-extra",extra)] : []),
+    );
+  };
+
   const ask=()=>{
-    const enemy=enemies[0];
+    const q=enemy.question;
     locked=false;
-    head.textContent=enemy.weak ? `${enemy.name}も現れた！` : `${enemy.name}が現れた！`;
-    book.textContent=`魔法書：${enemy.question.topic}`;
-    renderHearts(); renderEnemies();
-    prompt.textContent=enemy.question.prompt;
-    message.textContent="";
+    count++;
+    bookChip.textContent=`魔法書　${q.topic}`;
+    counter.textContent=`第${count}問`;
+    renderHearts();
+    prompt.textContent=q.prompt;
+    feedback.className="se-battle-feedback";
+    feedback.replaceChildren();
     nextBtn.style.display="none"; unknownBtn.style.display="";
-    if(enemy.question.inputMode==="text"){
+    if(q.inputMode==="text"){
+      choiceBox.className="se-battle-choices is-input";
       const input=el("input","se-battle-input");
       input.type="text";
       input.autocomplete="off";
+      input.placeholder="答えを入力（例：12、-3、3/4）";
       const submit=el("button","se-btn is-primary","こたえる");
       submit.type="button";
       const row=el("div","se-battle-input-row");
       row.append(input,submit);
       choiceBox.replaceChildren(row);
-      const submitFn=()=>{ if(!locked) answerText(input.value); };
+      const submitFn=()=>{ if(!locked && input.value.trim()) answerText(input.value); };
       submit.addEventListener("click",submitFn);
-      input.addEventListener("keydown",(ev)=>{ if(ev.key==="Enter") submitFn(); });
+      input.addEventListener("keydown",(ev)=>{ if(ev.key==="Enter"){ ev.stopPropagation(); submitFn(); } });
       setTimeout(()=>input.focus(),0);
     } else {
-      choiceBox.replaceChildren(...enemy.question.choices.map((c,i)=>{
-        const b=el("button","se-btn",c);
+      choiceBox.className="se-battle-choices";
+      const marks=["1","2","3","4"];
+      choiceBox.replaceChildren(...q.choices.map((c,i)=>{
+        const b=el("button","se-battle-choice");
         b.type="button";
+        b.append(el("span","se-battle-choice-no",marks[i] ?? ""),el("span","se-battle-choice-text",c));
         b.addEventListener("click",()=>answer(i));
         return b;
       }));
@@ -261,33 +296,30 @@ export async function openBattle(enemyName:string, onEnd:(result:"win"|"lose")=>
     [...choiceBox.children].forEach((b,i)=>{
       const btn=b as HTMLButtonElement;
       btn.disabled=true;
-      if(i===correct) btn.classList.add("is-primary");
-      else if(i===picked) btn.style.textDecoration="line-through";
+      if(i===correct) btn.classList.add("is-correct");
+      else if(i===picked) btn.classList.add("is-wrong");
     });
   };
 
-  const lockInput=()=>{
+  const lockInput=(correct:boolean)=>{
     locked=true;
-    const row=choiceBox.firstElementChild;
-    row?.querySelectorAll("input,button").forEach((el)=>((el as HTMLInputElement|HTMLButtonElement).disabled=true));
-  };
-
-  const defeat=(text:string)=>{
-    const enemy=enemies.shift()!;
-    message.textContent=`${text}${enemy.name}をたおした！`;
-    renderEnemies();
-    showNext(()=>enemies.length>0 ? ask() : close("win"));
+    const input=choiceBox.querySelector("input");
+    input?.classList.add(correct ? "is-correct" : "is-wrong");
+    choiceBox.querySelectorAll("input,button").forEach((x)=>((x as HTMLInputElement|HTMLButtonElement).disabled=true));
   };
 
   const resolveResult=async (correct:boolean)=>{
-    const enemy=enemies[0];
     const q=enemy.question;
     if(correct){
       record(q,"solved");
       enemy.hearts--;
-      if(enemy.hearts<=0){ defeat("正解！ "); return; }
-      renderEnemies();
-      message.textContent=`正解！ ${enemy.name}のハートが1つ減った。`;
+      renderHearts();
+      if(enemy.hearts<=0){
+        showFeedback("good","正解！",q,`${enemy.name}をたおした！`);
+        showNext(()=>close("win"),"町へもどる");
+        return;
+      }
+      showFeedback("good","正解！",q,`${enemy.name}のハートが1つ減った。`);
       enemy.question=await nextQuestion();
       showNext(ask);
       return;
@@ -295,44 +327,39 @@ export async function openBattle(enemyName:string, onEnd:(result:"win"|"lose")=>
     record(q,"wrong");
     hearts--;
     renderHearts();
-    message.textContent="ちがう！ ハートが1つ減った。";
     if(hearts<=0){
-      message.textContent+=" 力尽きた…町に戻される。";
-      showNext(()=>close("lose"));
+      showFeedback("bad","ちがう…",q,"力尽きた…町に戻される。");
+      showNext(()=>close("lose"),"町へもどる");
       return;
     }
-    // 次の問題（通常の敵は作り直し、苦手枠は同じ問題）
-    if(!enemy.weak) enemy.question=await nextQuestion();
+    showFeedback("bad","ちがう…",q,"ハートが1つ減った。");
+    enemy.question=await nextQuestion();
     showNext(ask);
   };
 
   const answer=(i:number)=>{
     if(locked) return;
-    const q=enemies[0].question;
+    const q=enemy.question;
     lockChoices(q.answerIndex,i);
     void resolveResult(i===q.answerIndex);
   };
 
   const answerText=(value:string)=>{
     if(locked) return;
-    const q=enemies[0].question;
-    const correct=value.trim()===String(q.expectedAnswer ?? "").trim();
-    lockInput();
-    if(!correct) message.textContent=`正解は ${q.expectedAnswer}。`;
+    const q=enemy.question;
+    const given=normalizeAnswer(value);
+    const correct=[q.expectedAnswer ?? "",...(q.accept ?? [])].some(a=>normalizeAnswer(a)===given);
+    lockInput(correct);
     void resolveResult(correct);
   };
 
   unknownBtn.addEventListener("click",()=>{
     if(locked) return;
-    const q=enemies[0].question;
-    const answerLabel=q.inputMode==="text" ? (q.expectedAnswer ?? "") : q.choices[q.answerIndex];
-    if(q.inputMode==="text") lockInput(); else lockChoices(q.answerIndex,-1);
+    const q=enemy.question;
+    if(q.inputMode==="text") lockInput(false); else lockChoices(q.answerIndex,-1);
     record(q,"unknown");
-    message.textContent=`正解は ${answerLabel}。${q.explain} `;
-    const enemy=enemies.shift()!;
-    message.textContent+=`${enemy.name}をたおした！`;
-    renderEnemies();
-    showNext(()=>enemies.length>0 ? ask() : close("win"));
+    showFeedback("info","こたえ",q,`${enemy.name}をたおした！`);
+    showNext(()=>close("win"),"町へもどる");
   });
 
   ask();

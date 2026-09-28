@@ -1,6 +1,6 @@
 // 学問クイズデータ（data/questions/<学問>.json）の読み込み。
-// トピックの type が "knowledge" のものだけ、実際の問題（questions配列）を持っていて出題できる。
-// type が "calc" のものはまだパターン仕様だけで、実行コードのある一部トピック（下の PLAYABLE_CALC_TOPIC_IDS）を除き出題できない。
+// questions 配列に問題があるトピックだけ出題できる（knowledge型は用語・演習問題、
+// calc型は scripts/math_problems/ で生成した具体的な計算問題）。
 
 export type QuestionFormat = "4択" | "○×" | "並べ替え" | "数字入力";
 
@@ -10,6 +10,7 @@ export type RawKnowledgeQuestion = {
   prompt: string;
   options?: string[];
   answer: number | boolean | string | string[];
+  accept?: string[];
   explain: string;
 };
 
@@ -31,6 +32,7 @@ export type CalcTopic = {
   type: "calc";
   summary: string;
   types: unknown[];
+  questions?: RawKnowledgeQuestion[];
 };
 
 export type SubjectTopic = KnowledgeTopic | CalcTopic;
@@ -66,26 +68,20 @@ export function loadSubjectTopics(subjectNameJa: string): Promise<SubjectTopic[]
   return p;
 }
 
-// まだ生成コードを書いていない calc 型トピックのうち、既存のゲームコードで出題できるものだけをここに登録する。
-// キーはトピックID、値はそのトピック専用の問題生成関数（intellect-battle.ts 側で登録する）。
+// JSONには無いが、ゲームコード側に生成関数があるトピック
 export const PLAYABLE_CALC_TOPIC_IDS = new Set<string>([
-  "math-number-calculation-017", // 分数の加法・減法（既存のフォールバック生成コード）
+  "math-number-calculation-017", // 分数の加法・減法
 ]);
 
 export async function getPlayableTopicIds(subjectNameJa: string): Promise<Set<string>> {
   const topics = await loadSubjectTopics(subjectNameJa);
-  const ids = new Set<string>();
-  for (const t of topics) {
-    if (t.type === "knowledge" && t.questions.length > 0) ids.add(t.topic_id);
-    else if (PLAYABLE_CALC_TOPIC_IDS.has(t.topic_id)) ids.add(t.topic_id);
-  }
-  for (const id of PLAYABLE_CALC_TOPIC_IDS) ids.add(id); // 分数の加法・減法のようにJSON側に無いものも含める
+  const ids = new Set<string>(PLAYABLE_CALC_TOPIC_IDS);
+  for (const t of topics) if (t.questions?.length) ids.add(t.topic_id);
   return ids;
 }
 
 export async function isPlayableTopic(subjectNameJa: string, topicId: string): Promise<boolean> {
   if (PLAYABLE_CALC_TOPIC_IDS.has(topicId)) return true;
   const topics = await loadSubjectTopics(subjectNameJa);
-  const t = topics.find((x) => x.topic_id === topicId);
-  return Boolean(t && t.type === "knowledge" && t.questions.length > 0);
+  return Boolean(topics.find((x) => x.topic_id === topicId)?.questions?.length);
 }
