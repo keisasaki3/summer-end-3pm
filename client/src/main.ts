@@ -1,8 +1,9 @@
 import Phaser from "phaser";
 import { GAME_TITLE } from "./branding";
 import { UI_THEMES, applyUiTheme, getUiTheme, type UiTheme, type UiThemeId } from "./ui-theme";
-import { openBattle, openQuestionBook } from "./intellect-battle";
-import { openStatusWindow } from "./status-window";
+import { openBattle, openQuestionBook, type EquippedTopic } from "./intellect-battle";
+import { openStatusWindow, loadEquipment } from "./status-window";
+import { isPlayableTopic } from "./quiz-data";
 import {
   ensureProfile,
   getCurrentSession,
@@ -1797,19 +1798,31 @@ for(const race of usableRaces){
     if(pd<34) this.startBattle();
   }
 
-  private startBattle() {
+  private async pickEquippedTopic(): Promise<EquippedTopic|undefined> {
+    const equipment=loadEquipment();
+    for(const book of Object.values(equipment)){
+      if(!book.subject) continue; // 自作ステータスの装備はまだ出題コードが無い
+      if(await isPlayableTopic(book.subject,book.topic_id)){
+        return { subject:book.subject, topicId:book.topic_id, topicName:book.name };
+      }
+    }
+    return undefined;
+  }
+
+  private async startBattle() {
     if(this.battleOpen) return;
     this.battleOpen=true;
     this.clearMoveTarget();
     this.joystick.dx=0; this.joystick.dy=0; this.joystick.active=false;
     this.hideJoystick();
     this.animateWalker(this.me!,false);
+    const equipped=await this.pickEquippedTopic();
     openBattle("ソロバンハリネズミ",(result)=>{
       this.battleOpen=false;
       this.chimera?.destroy(true); this.chimera=undefined;
       this.chimeraRespawnAt=this.time.now+20000;
       if(result==="lose") this.switchMap("yunagicho",640,530);
-    });
+    },equipped);
   }
 
   private sendPosition() {

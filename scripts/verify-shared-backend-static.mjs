@@ -33,7 +33,6 @@ const checks={
   status_server_write:server.includes("setPresenceStatus(player.id, nextStatus)"),
   map_transition_save:server.includes("void persistPlayerState(player, true);\n      return;"),
   logout_save:server.includes("await persistPlayerState(player, true)"),
-  quiz_removed:!/quiz/i.test(main) && !/quiz/i.test(server),
 };
 let failed=0;
 for(const [name,ok] of Object.entries(checks)){

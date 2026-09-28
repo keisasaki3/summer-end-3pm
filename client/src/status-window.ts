@@ -1,5 +1,6 @@
 import { supabase, type PresenceStatus } from "./shared-backend";
 import { MAX_HEARTS } from "./intellect-battle";
+import { getImplementedSubjectNames, getPlayableTopicIds } from "./quiz-data";
 
 // ステータスウインドウと装備ウインドウ（β0.61）。
 // 人生クエストのデータ（Supabase の quest_* テーブル）を読むだけで、書き換えはしない。
@@ -35,7 +36,7 @@ type LifeQuestData = {
   lv: number;
 };
 
-export type EquippedBook = { topic_id: string; name: string };
+export type EquippedBook = { topic_id: string; name: string; subject?: string };
 
 const EQUIP_KEY = "summer-end-3pm-equipment";
 
@@ -177,40 +178,41 @@ function formatValue(value: number, unit: string | null) {
   return unit ? `${text} ${unit}` : text;
 }
 
-// 魔法書をつけられるのは学問（29学問・英語）と自作ステータスのうちチェック項目があるもの
+// 魔法書をつけられるのは学問（29学問・英語）のうち、実際にクイズデータが実装済みの学問だけ（Keita 2026-09-28 方針）。
+// 自作ステータスの項目は出題コードが無いのでまだ対象外。
 function canEquipBook(data: LifeQuestData, s: UserStatus) {
-  if (s.preset_subject_id) {
-    const preset = data.subjects.get(s.preset_subject_id);
-    return preset?.preset_group === "29学問" || s.preset_subject_id === "english";
-  }
-  return ownTopics(data, s).some((t) => t.input_type === "check");
+  if (!s.preset_subject_id) return false;
+  const preset = data.subjects.get(s.preset_subject_id);
+  if (preset?.preset_group !== "29学問" && s.preset_subject_id !== "english") return false;
+  const implemented = getImplementedSubjectNames();
+  return Boolean(preset && implemented.includes(preset.name_ja));
 }
 
 type BookChoice = { topic_id: string; name: string; field: string; mastered: boolean };
 
 async function loadBookChoices(data: LifeQuestData, s: UserStatus): Promise<BookChoice[]> {
   const choices: BookChoice[] = [];
-  if (s.preset_subject_id) {
-    const sb = supabase!;
-    const { data: fields, error } = await sb.from("quest_fields").select("field_id,name,sort_order").eq("subject_id", s.preset_subject_id).eq("active", true).order("sort_order");
-    if (error) throw error;
-    const fieldName = new Map((fields || []).map((f) => [f.field_id, f.name]));
-    const fieldOrder = new Map((fields || []).map((f, i) => [f.field_id, i]));
-    const ids = [...fieldName.keys()];
-    const topics: { topic_id: string; field_id: string; name: string; recommended_order: number }[] = [];
-    for (let i = 0; i < ids.length; i += 100) {
-      const rows = await fetchAll<{ topic_id: string; field_id: string; name: string; recommended_order: number }>((a, b) =>
-        sb.from("quest_topics").select("topic_id,field_id,name,recommended_order").eq("active", true).eq("input_type", "check").in("field_id", ids.slice(i, i + 100)).range(a, b));
-      topics.push(...rows);
-    }
-    topics.sort((a, b) => (fieldOrder.get(a.field_id)! - fieldOrder.get(b.field_id)!) || a.recommended_order - b.recommended_order || a.topic_id.localeCompare(b.topic_id));
-    for (const t of topics) choices.push({ topic_id: t.topic_id, name: t.name, field: fieldName.get(t.field_id) || "", mastered: data.mastered.has(t.topic_id) });
+  if (!s.preset_subject_id) return choices; // 自作ステータスの項目は出題コードが無いのでまだ対象外
+  const preset = data.subjects.get(s.preset_subject_id);
+  if (!preset) return choices;
+  const playableIds = await getPlayableTopicIds(preset.name_ja);
+  if (playableIds.size === 0) return choices;
+  const sb = supabase!;
+  const { data: fields, error } = await sb.from("quest_fields").select("field_id,name,sort_order").eq("subject_id", s.preset_subject_id).eq("active", true).order("sort_order");
+  if (error) throw error;
+  const fieldName = new Map((fields || []).map((f) => [f.field_id, f.name]));
+  const fieldOrder = new Map((fields || []).map((f, i) => [f.field_id, i]));
+  const ids = [...fieldName.keys()];
+  const topics: { topic_id: string; field_id: string; name: string; recommended_order: number }[] = [];
+  for (let i = 0; i < ids.length; i += 100) {
+    const rows = await fetchAll<{ topic_id: string; field_id: string; name: string; recommended_order: number }>((a, b) =>
+      sb.from("quest_topics").select("topic_id,field_id,name,recommended_order").eq("active", true).eq("input_type", "check").in("field_id", ids.slice(i, i + 100)).range(a, b));
+    topics.push(...rows);
   }
-  const fields = data.userFields.filter((f) => f.status_id === s.status_id).sort((a, b) => a.sort_order - b.sort_order);
-  for (const f of fields) {
-    for (const t of data.userTopics.filter((x) => x.field_id === f.field_id && x.input_type === "check").sort((a, b) => a.sort_order - b.sort_order)) {
-      choices.push({ topic_id: t.topic_id, name: t.name, field: f.name, mastered: Boolean(t.mastered_at) });
-    }
+  topics.sort((a, b) => (fieldOrder.get(a.field_id)! - fieldOrder.get(b.field_id)!) || a.recommended_order - b.recommended_order || a.topic_id.localeCompare(b.topic_id));
+  for (const t of topics) {
+    if (!playableIds.has(t.topic_id)) continue; // ちゃんと実装した（出題可能な）トピックだけ選べるようにする
+    choices.push({ topic_id: t.topic_id, name: t.name, field: fieldName.get(t.field_id) || "", mastered: data.mastered.has(t.topic_id) });
   }
   return choices;
 }
@@ -369,13 +371,14 @@ export function openStatusWindow(opts: StatusWindowOptions) {
       row.type = "button";
       row.append(el("span", "se-lq-name", c.name), el("span", "se-lq-stars", c.mastered ? "★" : ""));
       row.addEventListener("click", () => {
-        equipment[s.status_id] = { topic_id: c.topic_id, name: c.name };
+        const subject = s.preset_subject_id ? data.subjects.get(s.preset_subject_id)?.name_ja : undefined;
+        equipment[s.status_id] = { topic_id: c.topic_id, name: c.name, subject };
         saveEquipment(equipment);
         renderEquip();
       });
       list.appendChild(row);
     }
-    if (choices.length === 0) list.appendChild(el("div", "se-message", "トピックがない。"));
+    if (choices.length === 0) list.appendChild(el("div", "se-message", "遊べるトピックがまだない。"));
     body.replaceChildren(el("div", "se-label", `${statusName(data, s)}の魔法書を選ぶ`), list, back);
   }
 
