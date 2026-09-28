@@ -1519,7 +1519,7 @@ for(const race of usableRaces){
     sub.className="se-hud-sub";
     const now=new Date();
     const clock=`${now.getHours()}:${String(now.getMinutes()).padStart(2,"0")}`;
-    sub.textContent=this.currentMap==="yunagicho" ? `${clock} · β 0.62` : "β 0.62";
+    sub.textContent=this.currentMap==="yunagicho" ? `${clock} · β 0.65` : "β 0.65";
     this.mapTitle.replaceChildren(name,sub);
   }
 
