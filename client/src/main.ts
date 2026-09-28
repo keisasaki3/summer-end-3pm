@@ -1,6 +1,7 @@
 import Phaser from "phaser";
 import { GAME_TITLE } from "./branding";
 import { UI_THEMES, applyUiTheme, getUiTheme, type UiTheme, type UiThemeId } from "./ui-theme";
+import { openBattle, openQuestionBook } from "./intellect-battle";
 import {
   ensureProfile,
   getCurrentSession,
@@ -92,6 +93,11 @@ class WalkScene extends Phaser.Scene {
   // 空でないマップでは、この範囲の外を通行不可にする。
   private walkablePolygons: Phaser.Geom.Polygon[] = [];
   private currentMap: MapId = "yunagicho";
+  // 知性バトル（最小版）: 夕凪町の堤防の上を戦闘地域とし、キメラ1体が歩き回る。
+  private chimera?: Phaser.GameObjects.Container;
+  private chimeraRespawnAt = 0;
+  private chimeraWander = { x:1440, y:290, until:0 };
+  private battleOpen = false;
   private background?: Phaser.GameObjects.Image;
   private mapTitle?: HTMLDivElement;
   private transitionLock = false;
@@ -210,6 +216,7 @@ class WalkScene extends Phaser.Scene {
     this.cameras.main.setBackgroundColor("#c88f72");
     this.cameras.main.setZoom(RENDER_ZOOM);
     this.setupImageField();
+    this.makeChimeraTexture();
 
     if (this.input.keyboard) {
       this.cursors = {
@@ -1403,6 +1410,14 @@ for(const race of usableRaces){
     credits.append(creditTitle,creditLink,yunagiCreditTitle,yunagiCreditLink,komorebiCreditTitle,komorebiCreditLink);
     box.appendChild(credits);
 
+    const bookButton=document.createElement("button");
+    bookButton.type="button";
+    bookButton.className="se-btn";
+    bookButton.textContent="問題図鑑";
+    bookButton.style.marginTop="14px";
+    bookButton.addEventListener("click",()=>{panel.style.display="none";openQuestionBook();});
+    box.appendChild(bookButton);
+
     const actions=document.createElement("div");
     actions.className="se-actions";
     const closeButton=document.createElement("button");
@@ -1489,7 +1504,7 @@ for(const race of usableRaces){
     name.textContent=this.mapData[this.currentMap].name;
     const sub=document.createElement("div");
     sub.className="se-hud-sub";
-    sub.textContent=this.currentMap==="yunagicho" ? "18:42 · β 0.58" : "β 0.58";
+    sub.textContent=this.currentMap==="yunagicho" ? "18:42 · β 0.59" : "β 0.59";
     this.mapTitle.replaceChildren(name,sub);
   }
 
@@ -1643,7 +1658,8 @@ for(const race of usableRaces){
       );
     }
 
-    if (this.loginOpen || this.isDomEditing()) {
+    if(!this.loginOpen && !this.battleOpen) this.updateChimera(time,delta);
+    if (this.loginOpen || this.isDomEditing() || this.battleOpen) {
       // 移動中にチャット入力を開いた場合も、止まった位置を送っておく。
       if(this.positionUnsent && time-this.lastSent>50) { this.sendPosition(); this.lastSent=time; }
       return;
@@ -1705,6 +1721,84 @@ for(const race of usableRaces){
       this.sendPosition();
       this.lastSent=time;
     }
+  }
+
+  // 仮画像: ソロバンハリネズミ（数学のキメラ）。正式な絵ができたら差し替える。
+  private makeChimeraTexture() {
+    const g=this.make.graphics({x:0,y:0},false);
+    g.fillStyle(0x4a3322,1);
+    for(let i=0;i<9;i++){
+      const a=Math.PI*(1.05+i*0.11), cx=30+Math.cos(a)*22, cy=40+Math.sin(a)*16;
+      g.fillTriangle(cx-5,cy+4,cx+5,cy+4,30+Math.cos(a)*34,40+Math.sin(a)*27);
+    }
+    g.fillStyle(0x9b6b43,1).fillEllipse(30,42,50,30);
+    g.fillStyle(0x3b2616,1).fillEllipse(18,56,9,6).fillEllipse(40,57,9,6);
+    g.fillStyle(0xe8c9a0,1).fillEllipse(51,45,20,17);
+    g.fillStyle(0x111111,1).fillCircle(61,45,2.5).fillCircle(50,41,2);
+    g.lineStyle(2,0x5b3a1e,1).strokeRect(12,36,22,14);
+    g.lineStyle(1,0x5b3a1e,1).lineBetween(12,42,34,42);
+    const beads=[0xd6455d,0xf2c14e,0x3aa39f];
+    for(let r=0;r<3;r++) for(let b=0;b<3;b++) g.fillStyle(beads[(r+b)%3],1).fillCircle(16+r*7,b===0?39:44+(b-1)*4,2);
+    g.generateTexture("chimera-soroban",64,64);
+    g.destroy();
+  }
+
+  private spawnChimera() {
+    const c=this.add.container(1440,290);
+    const img=this.add.image(0,-22,"chimera-soroban");
+    const label=this.add.text(0,-60,"ソロバンハリネズミ",{fontFamily:this.uiTheme.font,fontSize:"11px",color:this.uiTheme.nameFg,backgroundColor:this.uiTheme.nameBg,padding:{x:4,y:1}}).setOrigin(.5);
+    c.add([img,label]);
+    c.setData("img",img);
+    this.chimera=c;
+  }
+
+  private updateChimera(time:number,delta:number) {
+    if(!this.me) return;
+    if(this.currentMap!=="yunagicho"){
+      this.chimera?.destroy(true); this.chimera=undefined;
+      return;
+    }
+    if(!this.chimera){
+      if(time>=this.chimeraRespawnAt) this.spawnChimera();
+      return;
+    }
+    const c=this.chimera;
+    const px=this.me.x-c.x, py=this.me.y-c.y, pd=Math.hypot(px,py);
+    const home=Math.hypot(c.x-1440,c.y-290);
+    let tx=this.chimeraWander.x, ty=this.chimeraWander.y, speed=40;
+    if(pd<240 && home<320){ tx=this.me.x; ty=this.me.y; speed=95; }
+    else if(time>this.chimeraWander.until || Math.hypot(tx-c.x,ty-c.y)<4){
+      // 堤防の上（戦闘地域）の中で次の目的地を選ぶ
+      for(let i=0;i<10;i++){
+        const nx=Phaser.Math.Between(1340,1500), ny=Phaser.Math.Between(270,320);
+        if(!this.isBlocked(nx,ny)){ this.chimeraWander={x:nx,y:ny,until:time+Phaser.Math.Between(2000,4000)}; break; }
+      }
+      tx=this.chimeraWander.x; ty=this.chimeraWander.y;
+    }
+    const dx=tx-c.x, dy=ty-c.y, dist=Math.hypot(dx,dy);
+    if(dist>1){
+      const step=Math.min(dist,speed*delta/1000), nx=c.x+dx/dist*step, ny=c.y+dy/dist*step;
+      if(!this.isBlocked(nx,c.y)) c.x=nx;
+      if(!this.isBlocked(c.x,ny)) c.y=ny;
+      (c.getData("img") as Phaser.GameObjects.Image).setFlipX(dx<0).setY(-22+Math.abs(Math.sin(time/90))*-2);
+    }
+    c.setDepth(c.y);
+    if(pd<34) this.startBattle();
+  }
+
+  private startBattle() {
+    if(this.battleOpen) return;
+    this.battleOpen=true;
+    this.clearMoveTarget();
+    this.joystick.dx=0; this.joystick.dy=0; this.joystick.active=false;
+    this.hideJoystick();
+    this.animateWalker(this.me!,false);
+    openBattle("ソロバンハリネズミ",(result)=>{
+      this.battleOpen=false;
+      this.chimera?.destroy(true); this.chimera=undefined;
+      this.chimeraRespawnAt=this.time.now+20000;
+      if(result==="lose") this.switchMap("yunagicho",640,530);
+    });
   }
 
   private sendPosition() {
