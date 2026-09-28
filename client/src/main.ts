@@ -2,6 +2,7 @@ import Phaser from "phaser";
 import { GAME_TITLE } from "./branding";
 import { UI_THEMES, applyUiTheme, getUiTheme, type UiTheme, type UiThemeId } from "./ui-theme";
 import { openBattle, openQuestionBook } from "./intellect-battle";
+import { openStatusWindow } from "./status-window";
 import {
   ensureProfile,
   getCurrentSession,
@@ -1318,6 +1319,24 @@ for(const race of usableRaces){
     bookButton.addEventListener("click",()=>openQuestionBook());
     document.body.appendChild(bookButton);
 
+    // ステータス・装備ウインドウ（図鑑の左隣）。状態の変更もここでする
+    const statusButton=document.createElement("button");
+    statusButton.type="button";
+    statusButton.title="ステータス";
+    statusButton.className="se-plate se-icon-btn se-status-btn";
+    statusButton.innerHTML='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 21v-1a6 6 0 0 1 6-6h4a6 6 0 0 1 6 6v1"/></svg>';
+    statusButton.addEventListener("click",()=>openStatusWindow({
+      userId:sharedBackendEnabled && this.authUserId ? this.authUserId : null,
+      playerName:this.playerName,
+      presence:this.presenceStatus,
+      onPresence:(status)=>{
+        if(this.socket?.readyState!==WebSocket.OPEN)return false;
+        this.socket.send(JSON.stringify({type:"status",status}));
+        return true;
+      }
+    }));
+    document.body.appendChild(statusButton);
+
     const panel=document.createElement("div");
     panel.className="se-overlay";
     Object.assign(panel.style,{display:"none",zIndex:"15000"});
@@ -1372,31 +1391,6 @@ for(const race of usableRaces){
       for(const sound of this.activeMapAmbience) sound.setVolume(this.masterVolume);
     });
     box.append(volumeLabel,volume);
-
-    let statusSelect:HTMLSelectElement|undefined;
-    if(sharedBackendEnabled && this.authUserId){
-      const statusLabel=document.createElement("label");
-      statusLabel.className="se-label";
-      statusLabel.textContent="ステータス";
-      statusLabel.style.marginTop="20px";
-      statusSelect=document.createElement("select");
-      for(const [value,label] of [["online","オンライン"],["studying","勉強中"],["reading","読書中"],["working","作業中"],["busy","取り込み中"],["afk","AFK"]] as const){
-        const option=document.createElement("option");
-        option.value=value;option.textContent=label;statusSelect.appendChild(option);
-      }
-      statusSelect.className="se-field";
-      statusSelect.style.marginBottom="0";
-      statusSelect.value=this.presenceStatus;
-      statusSelect.addEventListener("change",()=>{
-        const next=this.normalizeStatus(statusSelect?.value);
-        if(this.socket?.readyState!==WebSocket.OPEN){
-          statusSelect!.value=this.presenceStatus;
-          return;
-        }
-        this.socket.send(JSON.stringify({type:"status",status:next}));
-      });
-      box.append(statusLabel,statusSelect);
-    }
 
     const credits=document.createElement("div");
     credits.className="se-credits";
@@ -1477,7 +1471,6 @@ for(const race of usableRaces){
     const sync=()=>{
       themeSelect.value=this.uiTheme.id;
       coords.checked=this.coordsVisible;
-      if(statusSelect)statusSelect.value=this.presenceStatus;
     };
     coords.addEventListener("change",()=>{
       this.coordsVisible=coords.checked;
@@ -1515,7 +1508,7 @@ for(const race of usableRaces){
     sub.className="se-hud-sub";
     const now=new Date();
     const clock=`${now.getHours()}:${String(now.getMinutes()).padStart(2,"0")}`;
-    sub.textContent=this.currentMap==="yunagicho" ? `${clock} · β 0.60` : "β 0.60";
+    sub.textContent=this.currentMap==="yunagicho" ? `${clock} · β 0.61` : "β 0.61";
     this.mapTitle.replaceChildren(name,sub);
   }
 
