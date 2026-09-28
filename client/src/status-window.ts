@@ -1,4 +1,5 @@
 import { supabase, type PresenceStatus } from "./shared-backend";
+import { MAX_HEARTS } from "./intellect-battle";
 
 // ステータスウインドウと装備ウインドウ（β0.61）。
 // 人生クエストのデータ（Supabase の quest_* テーブル）を読むだけで、書き換えはしない。
@@ -288,6 +289,7 @@ export function openStatusWindow(opts: StatusWindowOptions) {
     if (current !== "status") return;
     const head = el("div", "se-status-head");
     head.append(el("div", "se-status-name", opts.playerName), el("div", "se-status-lv", `Lv ${data.lv}`));
+    const hearts = el("div", "se-status-hearts", "♥".repeat(MAX_HEARTS));
     const list = el("div", "se-lq-list");
     if (data.statuses.length === 0) list.appendChild(el("div", "se-message", "人生クエストにステータスがまだない。"));
     for (const s of data.statuses) {
@@ -296,7 +298,7 @@ export function openStatusWindow(opts: StatusWindowOptions) {
       row.append(statusIcon(data, s), el("span", "se-lq-name", statusName(data, s)), el("span", `se-lq-stars${badge.zero ? " is-zero" : ""}`, badge.text));
       list.appendChild(row);
     }
-    body.replaceChildren(head, el("div", "se-label", "状態"), presenceRow(), el("div", "se-label", "人生クエスト"), list);
+    body.replaceChildren(head, hearts, el("div", "se-label", "状態"), presenceRow(), el("div", "se-label", "人生クエスト"), list);
   }
 
   async function renderEquip() {

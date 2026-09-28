@@ -190,6 +190,7 @@ html[data-theme="R"] .se-heading::after{content:"";display:block;height:3px;marg
 .se-status-head{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:10px}
 .se-status-name{font-size:18px;font-weight:bold}
 .se-status-lv{font-size:18px}
+.se-status-hearts{font-size:20px;color:#d9443a;letter-spacing:2px;margin:-4px 0 10px}
 .se-presence-row{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin:6px 0 14px}
 .se-presence-btn{box-sizing:border-box;min-width:0;display:flex;align-items:center;gap:6px;padding:6px 8px;border:1px solid currentColor;border-radius:6px;background:transparent;color:inherit;font:inherit;font-size:13px;cursor:pointer;opacity:.6}
 .se-presence-btn img{width:16px;height:16px;image-rendering:pixelated}
