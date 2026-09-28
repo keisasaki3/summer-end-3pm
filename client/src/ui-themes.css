@@ -16,6 +16,7 @@
 .se-hud-title .se-hud-name{font-family:var(--font-title);font-size:19px;letter-spacing:.12em;line-height:1.25}
 .se-hud-title .se-hud-sub{font-size:11px;letter-spacing:.12em;opacity:.8;margin-top:2px}
 .se-icon-btn{position:fixed;right:14px;top:14px;z-index:30;width:42px;height:42px;padding:0;display:flex;align-items:center;justify-content:center;cursor:pointer}
+.se-book-btn{right:66px}
 .se-icon-btn:active{transform:scale(.94)}
 .se-icon-btn svg{width:21px;height:21px}
 .se-coord{position:fixed;right:14px;top:66px;z-index:29;padding:4px 9px;font-size:11px!important;letter-spacing:.04em;pointer-events:none}
