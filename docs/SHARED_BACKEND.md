@@ -110,6 +110,7 @@ fresh page/loginは `resume: false` なのでDB stateを復元する。
 status:
 
 - studying / 勉強中
+- working / 作業中
 - reading / 読書中
 - busy / 取り込み中
 - afk / AFK

@@ -156,18 +156,16 @@ class WalkScene extends Phaser.Scene {
   }
 
   private normalizeStatus(value:unknown):PresenceStatus {
-    return value === "online" || value === "studying" || value === "reading" || value === "busy" || value === "afk" ? value : "online";
+    return value === "online" || value === "studying" || value === "reading" || value === "working" || value === "busy" || value === "afk" ? value : "online";
   }
 
-  private statusLabel(status:PresenceStatus) {
-    return status === "online" ? "" :
-      status === "studying" ? "勉強中" :
-      status === "reading" ? "読書中" :
-      status === "busy" ? "取り込み中" : "AFK";
-  }
-
-  private playerLabel(name:string,status:PresenceStatus) {
-    return status === "online" ? name : `${name}: ${this.statusLabel(status)}`;
+  // 頭上の名前の左にステータスアイコンを置く（public/status/*.svg）
+  private placeStatusIcon(c:Phaser.GameObjects.Container,status:PresenceStatus) {
+    const nameText=c.getData("nameText") as Phaser.GameObjects.Text | undefined;
+    const icon=c.getData("statusIcon") as Phaser.GameObjects.Image | undefined;
+    if(!nameText || !icon)return;
+    icon.setTexture(`status-${status}`);
+    icon.setPosition(nameText.x-nameText.displayWidth/2-10,nameText.y);
   }
 
   private normalizeDirection(value:unknown):Direction {
@@ -195,6 +193,9 @@ class WalkScene extends Phaser.Scene {
 
   preload() {
     this.load.image("yunagicho-field", "/yunagicho.png");
+    for(const status of ["online","studying","reading","working","busy","afk"]){
+      this.load.svg(`status-${status}`,`/status/${status}.svg`,{width:16,height:16});
+    }
     this.load.image("komorebi-field", "/komorebi-jinja.png");
     this.load.image("convenience-field", "/convenience-store.png");
     (["down","left","right","up"] as const).forEach(dir=>{
@@ -247,6 +248,8 @@ class WalkScene extends Phaser.Scene {
     this.mapTitle.className="se-plate se-hud-title";
     document.body.appendChild(this.mapTitle);
     this.updateMapTitle();
+    // 夕凪町の時刻はリアルの現在時刻。10秒ごとに更新する
+    this.time.addEvent({delay:10000,loop:true,callback:()=>this.updateMapTitle()});
     void document.fonts?.load(`11px ${this.uiTheme.font}`).catch(()=>{});
     document.fonts?.addEventListener?.("loadingdone",()=>this.refreshNameTags());
   }
@@ -272,12 +275,14 @@ class WalkScene extends Phaser.Scene {
     visual.add(sprite);
     visual.setScale(height);
 
-    const name=this.add.text(0,-88*height,this.playerLabel(label,status),{
+    const name=this.add.text(0,-88*height,label,{
       fontFamily:this.uiTheme.font,fontSize:"12px",color:this.uiTheme.nameFg,
       backgroundColor:this.uiTheme.nameBg,padding:{x:7,y:3}
     }).setOrigin(.5).setResolution(2);
 
-    const c=this.add.container(x,y,[visual,name]).setDepth(10);
+    const statusIcon=this.add.image(0,-88*height,`status-${status}`);
+    const c=this.add.container(x,y,[visual,name,statusIcon]).setDepth(10);
+    c.setData("statusIcon",statusIcon);
     c.setData("visual",visual);
     c.setData("sprite",sprite);
     c.setData("nameText",name);
@@ -296,6 +301,7 @@ class WalkScene extends Phaser.Scene {
     c.setData("idleFrame",3);
     c.setData("idleAnimStart",0);
     c.setData("nextIdleAnim",performance.now()+Phaser.Math.Between(4500,11000));
+    this.placeStatusIcon(c,status);
     return c;
   }
 
@@ -309,7 +315,8 @@ class WalkScene extends Phaser.Scene {
     c.setData("status",status);
     if(direction) c.setData("direction",direction);
     const nameText=c.getData("nameText") as Phaser.GameObjects.Text | undefined;
-    nameText?.setText(this.playerLabel(name,status));
+    nameText?.setText(name);
+    this.placeStatusIcon(c,status);
   }
 
   private animateWalker(c:Phaser.GameObjects.Container,moving:boolean,dx=0,dy=0) {
@@ -648,7 +655,7 @@ for(const race of usableRaces){
     statusLabel.className="se-label";
     statusLabel.textContent="ステータス";
     const status=document.createElement("select");
-    for(const [value,label] of [["online","オンライン"],["studying","勉強中"],["reading","読書中"],["busy","取り込み中"],["afk","AFK"]] as const){
+    for(const [value,label] of [["online","オンライン"],["studying","勉強中"],["reading","読書中"],["working","作業中"],["busy","取り込み中"],["afk","AFK"]] as const){
       const option=document.createElement("option");
       option.value=value;
       option.textContent=label;
@@ -1373,7 +1380,7 @@ for(const race of usableRaces){
       statusLabel.textContent="ステータス";
       statusLabel.style.marginTop="20px";
       statusSelect=document.createElement("select");
-      for(const [value,label] of [["online","オンライン"],["studying","勉強中"],["reading","読書中"],["busy","取り込み中"],["afk","AFK"]] as const){
+      for(const [value,label] of [["online","オンライン"],["studying","勉強中"],["reading","読書中"],["working","作業中"],["busy","取り込み中"],["afk","AFK"]] as const){
         const option=document.createElement("option");
         option.value=value;option.textContent=label;statusSelect.appendChild(option);
       }
@@ -1495,6 +1502,7 @@ for(const race of usableRaces){
     for(const c of players){
       const nameText=c.getData("nameText") as Phaser.GameObjects.Text | undefined;
       nameText?.setStyle({fontFamily:this.uiTheme.font,color:this.uiTheme.nameFg,backgroundColor:this.uiTheme.nameBg});
+      this.placeStatusIcon(c,this.normalizeStatus(c.getData("status")));
     }
   }
 
@@ -1505,7 +1513,9 @@ for(const race of usableRaces){
     name.textContent=this.mapData[this.currentMap].name;
     const sub=document.createElement("div");
     sub.className="se-hud-sub";
-    sub.textContent=this.currentMap==="yunagicho" ? "18:42 · β 0.59" : "β 0.59";
+    const now=new Date();
+    const clock=`${now.getHours()}:${String(now.getMinutes()).padStart(2,"0")}`;
+    sub.textContent=this.currentMap==="yunagicho" ? `${clock} · β 0.60` : "β 0.60";
     this.mapTitle.replaceChildren(name,sub);
   }
 
