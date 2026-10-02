@@ -26,7 +26,7 @@ const SERVER_URL = isViteDev
   ? `ws://${location.hostname}:8080`
   : `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}`;
 
-type MapId = "yunagicho" | "komorebi" | "convenience";
+type MapId = "yunagicho" | "komorebi" | "convenience" | "cafe";
 
 // ソロバンハリネズミの出現位置（木漏れ日神社の境内の真ん中）
 const CHIMERA_HOME = { map:"komorebi" as MapId, x:880, y:600 };
@@ -139,6 +139,10 @@ class WalkScene extends Phaser.Scene {
     convenience: {
       name:"コンビニ", texture:"convenience-field",
       audio:{ bgmKey:"convenience-night-ambience", ambienceKeys:[] }
+    },
+    cafe: {
+      name:"陽だまりの旧天文台カフェ", texture:"cafe-field",
+      audio:{ bgmKey:null, ambienceKeys:[] }
     }
   };
 
@@ -203,6 +207,7 @@ class WalkScene extends Phaser.Scene {
     }
     this.load.image("komorebi-field", "/komorebi-jinja.png");
     this.load.image("convenience-field", "/convenience-store.png");
+    this.load.image("cafe-field", "/observatory-cafe.png");
     (["down","left","right","up"] as const).forEach(dir=>{
       for(let i=0;i<7;i++){
         this.load.image(`teddy-${dir}-${i}`,`/sprites/runtime/teddy/${dir}-${i}.png`);
@@ -875,6 +880,12 @@ for(const race of usableRaces){
       // 背景画像差し替えに合わせ、歩ける範囲（境内の砂利・石畳の参道・拝殿前の石段）を多角形で指定する。
       // 拝殿・狛犬・灯籠・手水舎・社務所・植え込み・ベンチには入れない。
       W([[340,450],[440,440],[470,410],[650,400],[705,412],[705,440],[790,440],[805,420],[815,378],[990,378],[1000,420],[1005,440],[1085,440],[1100,418],[1160,405],[1200,415],[1290,420],[1302,442],[1272,500],[1258,580],[1252,640],[1300,690],[1322,760],[1262,812],[1210,864],[440,864],[462,800],[520,760],[560,705],[500,690],[450,650],[400,600],[345,570]]);
+    } else if(this.currentMap==="cafe") {
+      // 陽だまりの旧天文台カフェ: 歩ける範囲（床・入口の階段）を多角形で指定する。
+      // カウンターと椅子・本棚・ソファ・机・望遠鏡・植木・壁には入れない。
+      W([[640,864],[640,700],[625,650],[530,640],[500,610],[470,560],[420,470],[380,435],[300,435],[300,335],[330,330],[470,350],[530,325],[580,295],[640,270],[685,220],[705,185],[900,185],[950,232],[1050,232],[1140,225],[1145,350],[1262,362],[1252,478],[1335,540],[1345,570],[1330,640],[1295,722],[1150,738],[1000,692],[990,640],[900,640],[880,700],[880,864]]);
+      P([[748,412],[905,412],[915,470],[885,502],[770,502],[742,470]]); // 天球儀の台座
+      P([[1110,540],[1250,505],[1295,580],[1275,660],[1245,722],[1180,722],[1118,650]]); // 丸テーブルと椅子
     } else {
       // コンビニ: 駐車場を主な歩行エリアにする。
       P([[410,255],[1115,255],[1115,510],[410,510]]); // 店舗本体
@@ -895,6 +906,9 @@ for(const race of usableRaces){
     }else if(this.currentMap==="komorebi"){
       if(y<16)return true;
       if(y>848 && !(x>=720&&x<=930)) return true;
+    }else if(this.currentMap==="cafe"){
+      if(y<16)return true;
+      if(y>848 && !(x>=640&&x<=880)) return true;
     }else{
       if(y<16)return true;
       if(y>848) return true;
@@ -1519,7 +1533,7 @@ for(const race of usableRaces){
     sub.className="se-hud-sub";
     const now=new Date();
     const clock=`${now.getHours()}:${String(now.getMinutes()).padStart(2,"0")}`;
-    sub.textContent=this.currentMap==="yunagicho" ? `${clock} · β 0.65` : "β 0.65";
+    sub.textContent=this.currentMap==="yunagicho" ? `${clock} · β 0.66` : "β 0.66";
     this.mapTitle.replaceChildren(name,sub);
   }
 
@@ -1558,6 +1572,10 @@ for(const race of usableRaces){
   private checkMapTransition() {
     if(!this.me || this.transitionLock) return;
     if(this.currentMap==="yunagicho"){
+      // 商店前の歩道の左端 → 陽だまりの旧天文台カフェ
+      if(this.me.x<=160 && this.me.y>=455 && this.me.y<=505){
+        this.switchMap("cafe",760,800); return;
+      }
       // 暫定: 北へ上る道の上端 → 木漏れ日神社（正式なワープ位置は未設定）
       if(this.me.x>=805 && this.me.x<=860 && this.me.y<=104){
         this.switchMap("komorebi",820,805); return;
@@ -1569,6 +1587,11 @@ for(const race of usableRaces){
     }else if(this.currentMap==="komorebi"){
       if(this.me.x>=720 && this.me.x<=930 && this.me.y>=835){
         this.switchMap("yunagicho",830,140);
+      }
+    }else if(this.currentMap==="cafe"){
+      // 入口の階段の下端 → 夕凪町（商店前の歩道の左端）
+      if(this.me.x>=640 && this.me.x<=880 && this.me.y>=835){
+        this.switchMap("yunagicho",190,482);
       }
     }else{
       // コンビニ右端の道路（上下中央） → 夕凪町

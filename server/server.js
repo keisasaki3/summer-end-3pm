@@ -42,7 +42,7 @@ function broadcastMap(map, data, except) {
 }
 
 function normalizeMap(value, fallback = "yunagicho") {
-  return value === "komorebi" || value === "convenience" || value === "yunagicho"
+  return value === "komorebi" || value === "convenience" || value === "yunagicho" || value === "cafe"
     ? value
     : fallback;
 }
