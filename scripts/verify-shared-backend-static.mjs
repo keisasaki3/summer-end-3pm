@@ -25,7 +25,7 @@ const checks={
   server_ping_25s:server.includes("},25000)"),
   heartbeat_snapshot:server.includes('type:"heartbeat_ack"') && server.includes("players:visiblePlayers(player.map, player.id)"),
   reconnect_backoff:main.includes("1000*Math.pow(2,this.reconnectAttempts)") && main.includes(",8000"),
-  all_maps:["yunagicho","komorebi","convenience"].every(x=>main.includes(x) && server.includes(x)),
+  all_maps:["yunagicho","komorebi","convenience","cafe"].every(x=>main.includes(x) && server.includes(x)),
   chat:/type\s*:\s*["']chat["']/.test(main) && /msg\.type\s*===\s*["']chat["']/.test(server),
   y_sort:depth.includes("__summerEnd3pmGame") && depth.includes("players.sort") && depth.includes("const dy = Number(a.y) - Number(b.y)") && depth.includes("a === localPlayer") && depth.includes("PLAYER_DEPTH_BASE + index * PLAYER_DEPTH_STEP"),
   service_role_server_only:serverShared.includes("SUPABASE_SERVICE_ROLE_KEY") && !main.includes("SUPABASE_SERVICE_ROLE_KEY") && !shared.includes("SUPABASE_SERVICE_ROLE_KEY"),
