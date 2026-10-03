@@ -1897,7 +1897,7 @@ const SCREEN_ZOOM_KEY = "summer-end-3pm-screen-zoom";
 const SCREEN_ZOOM_CHOICES = [1,1.5,2,3] as const;
 type ScreenZoomSetting = 1 | 1.5 | 2 | 3;
 
-type ViewInfo = { width:number; height:number; zoom:number; textRes:number };
+type ViewInfo = { width:number; height:number; zoom:number; textRes:number; cssW:number; cssH:number };
 
 // 初めて開いたときだけ、そのときのウィンドウに合わせて決めて保存する（以後は変えない）。
 function initialScreenZoom():ScreenZoomSetting {
@@ -1929,18 +1929,37 @@ function computeView():ViewInfo {
   const w=Math.max(1,window.innerWidth), h=Math.max(1,window.innerHeight);
   // 選んだ倍率はウィンドウサイズが変わっても変えない（マップより広い窓ではマップの外が黒く映る）。
   const zoom=screenZoomSetting;
-  const d=deviceScale(w*h);
+  // ゲーム画面はマップ全体（選んだ倍率での大きさ）かウィンドウの小さい方。窓がそれより広いときは窓の中央に置く。
+  const cssW=Math.max(1,Math.min(w,Math.round(MAP_WIDTH*zoom)));
+  const cssH=Math.max(1,Math.min(h,Math.round(MAP_HEIGHT*zoom)));
+  const d=deviceScale(cssW*cssH);
   // 見た目の大きさは選んだ倍率どおり（物理ピクセル数が増えた分だけカメラ倍率も掛ける）。
   const camZoom=zoom*d;
   return {
-    width:Math.round(w*d), height:Math.round(h*d),
+    width:Math.round(cssW*d), height:Math.round(cssH*d),
     zoom:camZoom,
     // 文字は表示倍率と同じ解像度で描く（低いとかすれ、pixelArtで縮小すると線が抜ける）。
-    textRes:Math.min(4,Math.max(1,Math.ceil(camZoom)))
+    textRes:Math.min(4,Math.max(1,Math.ceil(camZoom))),
+    cssW, cssH
   };
 }
 
+// ゲーム画面（#app）をウィンドウの中央に置き、HUD用に四隅からの余白をCSS変数で渡す。
+function layoutStage() {
+  const w=window.innerWidth, h=window.innerHeight;
+  const x=Math.round((w-VIEW.cssW)/2), y=Math.round((h-VIEW.cssH)/2);
+  const app=document.getElementById("app");
+  if(app) Object.assign(app.style,{left:`${x}px`,top:`${y}px`,width:`${VIEW.cssW}px`,height:`${VIEW.cssH}px`});
+  const root=document.documentElement.style;
+  root.setProperty("--st-x",`${x}px`);
+  root.setProperty("--st-y",`${y}px`);
+  root.setProperty("--st-r",`${w-x-VIEW.cssW}px`);
+  root.setProperty("--st-b",`${h-y-VIEW.cssH}px`);
+  root.setProperty("--st-w",`${VIEW.cssW}px`);
+}
+
 let VIEW=computeView();
+layoutStage();
 if(IS_MOBILE) document.documentElement.classList.add("mobile");
 
 const game=new Phaser.Game({
@@ -1962,6 +1981,7 @@ const game=new Phaser.Game({
 // ウィンドウサイズ・倍率が変わったら、ゲームサイズとカメラ倍率を計算し直す。
 function resizeGame() {
   VIEW=computeView();
+  layoutStage();
   game.scale.resize(VIEW.width,VIEW.height);
   // 親要素（ウィンドウ）の最新の大きさを読み直してから表示サイズを合わせる（読み直さないと1回前のサイズで拡大縮小されてしまう）。
   game.scale.displaySize.setAspectRatio(VIEW.width/VIEW.height);
