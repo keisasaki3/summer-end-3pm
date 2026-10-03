@@ -285,10 +285,7 @@ class WalkScene extends Phaser.Scene {
     visual.add(sprite);
     visual.setScale(height);
 
-    const name=this.add.text(0,-88*height,label,{
-      fontFamily:this.uiTheme.font,fontSize:"13px",color:this.uiTheme.nameFg,
-      backgroundColor:this.uiTheme.nameBg,padding:{x:7,y:3}
-    }).setOrigin(.5).setResolution(VIEW.textRes);
+    const name=this.add.text(0,-88*height,label,this.nameTagStyle()).setOrigin(.5).setResolution(VIEW.textRes);
 
     const statusIcon=this.add.image(0,-88*height,`status-${status}`);
     const c=this.add.container(x,y,[visual,name,statusIcon]).setDepth(10);
@@ -1534,12 +1531,22 @@ for(const race of usableRaces){
     this.refreshNameTags();
   }
 
+  // 名札は箱なしの縁取り文字（地面や背景の明るさにかかわらず読めて、目立ちすぎない）。
+  private nameTagStyle():Phaser.Types.GameObjects.Text.TextStyle {
+    return {
+      fontFamily:this.uiTheme.font,fontSize:"12px",color:"#fff8ec",
+      stroke:"#1a1410",strokeThickness:3,
+      shadow:{offsetX:0,offsetY:1,color:"#000000",blur:2,stroke:true,fill:true},
+      backgroundColor:"",padding:{x:2,y:1}
+    };
+  }
+
   private refreshNameTags() {
     const players=[this.me,...this.others.values()].filter(Boolean) as Phaser.GameObjects.Container[];
     for(const c of players){
       const nameText=c.getData("nameText") as Phaser.GameObjects.Text | undefined;
       nameText?.setResolution(VIEW.textRes);
-      nameText?.setStyle({fontFamily:this.uiTheme.font,color:this.uiTheme.nameFg,backgroundColor:this.uiTheme.nameBg});
+      nameText?.setStyle(this.nameTagStyle());
       this.placeStatusIcon(c,this.normalizeStatus(c.getData("status")));
     }
   }
