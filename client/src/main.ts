@@ -1531,13 +1531,14 @@ for(const race of usableRaces){
     this.refreshNameTags();
   }
 
-  // 名札は箱なしの縁取り文字（地面や背景の明るさにかかわらず読めて、目立ちすぎない）。
+  // 名札は箱なしの縁取り文字。文字色と縁取り色はテーマごとに決め、背景の明るさにかかわらず読めるようにする。
   private nameTagStyle():Phaser.Types.GameObjects.Text.TextStyle {
+    const t=this.uiTheme;
     return {
-      fontFamily:this.uiTheme.font,fontSize:"12px",color:"#fff8ec",
-      stroke:"#1a1410",strokeThickness:3,
-      shadow:{offsetX:0,offsetY:1,color:"#000000",blur:2,stroke:true,fill:true},
-      backgroundColor:"",padding:{x:2,y:1}
+      fontFamily:t.font,fontSize:"13px",color:t.tagFill,
+      stroke:t.tagStroke,strokeThickness:3,
+      shadow:{offsetX:0,offsetY:1,color:t.tagStroke,blur:3,stroke:true,fill:true},
+      backgroundColor:"",padding:{x:3,y:2}
     };
   }
 
