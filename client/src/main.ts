@@ -1963,6 +1963,10 @@ const game=new Phaser.Game({
 function resizeGame() {
   VIEW=computeView();
   game.scale.resize(VIEW.width,VIEW.height);
+  // 親要素（ウィンドウ）の最新の大きさを読み直してから表示サイズを合わせる（読み直さないと1回前のサイズで拡大縮小されてしまう）。
+  game.scale.displaySize.setAspectRatio(VIEW.width/VIEW.height);
+  game.scale.getParentBounds();
+  game.scale.refresh();
   const scene=game.scene.getScenes(true)[0] as WalkScene | undefined;
   scene?.applyView();
 }
