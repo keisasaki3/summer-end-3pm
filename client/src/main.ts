@@ -1393,7 +1393,7 @@ for(const race of usableRaces){
     zoomSelect.className="se-field";
     zoomSelect.style.marginBottom="0";
     const zoomOptions=new Map<string,HTMLOptionElement>();
-    for(const [value,text] of [["auto","自動"],["1","1倍"],["2","2倍"],["3","3倍"]] as const){
+    for(const [value,text] of [["1","1倍"],["1.5","1.5倍"],["2","2倍"],["3","3倍"]] as const){
       const option=document.createElement("option");
       option.value=value;option.textContent=text;zoomSelect.appendChild(option);
       zoomOptions.set(value,option);
@@ -1402,7 +1402,7 @@ for(const race of usableRaces){
       zoomSelect.value=String(screenZoomSetting);
     };
     zoomSelect.addEventListener("change",()=>{
-      setScreenZoomSetting(zoomSelect.value==="auto" ? "auto" : Number(zoomSelect.value) as ScreenZoomSetting);
+      setScreenZoomSetting(Number(zoomSelect.value) as ScreenZoomSetting);
     });
     box.append(heading,themeLabel,themeSelect,zoomLabel,zoomSelect,coordsLabel);
 
@@ -1885,8 +1885,8 @@ for(const race of usableRaces){
 }
 
 // 画面は常にウィンドウいっぱいに表示し、カメラがプレイヤーを追う。倍率（ワールド1pxを画面何pxで表示するか）は
-// OPTIONSで「自動／1倍／2倍／3倍」から選ぶ。ドット絵がにじまないよう、選べるのは整数倍だけ。
-// 選んだ倍率は常にそのまま使う。自動だけは、マップ（1536x864）の外が映らない範囲で窓に合わせる。
+// OPTIONSで「1倍／1.5倍／2倍／3倍」から選ぶ。
+// 選んだ倍率は常にそのまま使い、ウィンドウサイズが変わっても変えない。
 const IS_MOBILE =
   window.matchMedia("(pointer: coarse)").matches &&
   Math.min(window.innerWidth, window.innerHeight) <= 600;
@@ -1894,23 +1894,30 @@ const IS_MOBILE =
 const MAP_WIDTH = 1536, MAP_HEIGHT = 864;
 const PC_AUTO_WIDTH = 1280, PC_AUTO_HEIGHT = 720;
 const SCREEN_ZOOM_KEY = "summer-end-3pm-screen-zoom";
-const SCREEN_ZOOM_CHOICES = [1,2,3] as const;
-type ScreenZoomSetting = "auto" | 1 | 2 | 3;
+const SCREEN_ZOOM_CHOICES = [1,1.5,2,3] as const;
+type ScreenZoomSetting = 1 | 1.5 | 2 | 3;
 
 type ViewInfo = { width:number; height:number; zoom:number; textRes:number };
 
+// 初めて開いたときだけ、そのときのウィンドウに合わせて決めて保存する（以後は変えない）。
+function initialScreenZoom():ScreenZoomSetting {
+  const w=window.innerWidth, h=window.innerHeight;
+  const need=Math.max(w/MAP_WIDTH,h/MAP_HEIGHT);
+  const fit=IS_MOBILE ? 1 : Math.floor(Math.min(w/PC_AUTO_WIDTH,h/PC_AUTO_HEIGHT));
+  const z=Math.min(3,Math.max(1,Math.ceil(need),fit));
+  return z as ScreenZoomSetting;
+}
+
 function loadScreenZoomSetting():ScreenZoomSetting {
   let v:string|null=null;
-  try{ v=localStorage.getItem(SCREEN_ZOOM_KEY); }catch{ /* 保存できない環境では自動 */ }
+  try{ v=localStorage.getItem(SCREEN_ZOOM_KEY); }catch{ /* 保存できない環境ではその場で決める */ }
   const n=Number(v);
-  return (SCREEN_ZOOM_CHOICES as readonly number[]).includes(n) ? n as ScreenZoomSetting : "auto";
+  if((SCREEN_ZOOM_CHOICES as readonly number[]).includes(n)) return n as ScreenZoomSetting;
+  const z=initialScreenZoom();
+  try{ localStorage.setItem(SCREEN_ZOOM_KEY,String(z)); }catch{ /* 保存できなくても今回は使う */ }
+  return z;
 }
 let screenZoomSetting=loadScreenZoomSetting();
-
-// 画面全体がマップに収まる最小の倍率（これ未満だとマップの外側が映る）。
-function minScreenZoom():number {
-  return Math.max(window.innerWidth/MAP_WIDTH,window.innerHeight/MAP_HEIGHT);
-}
 
 // 高精細画面では画面の物理ピクセルで描く（キャンバスが大きくなりすぎる場合は1倍に留める）。
 function deviceScale(areaPx:number):number {
@@ -1920,15 +1927,8 @@ function deviceScale(areaPx:number):number {
 
 function computeView():ViewInfo {
   const w=Math.max(1,window.innerWidth), h=Math.max(1,window.innerHeight);
-  const need=minScreenZoom();
-  let zoom:number;
-  if(screenZoomSetting==="auto"){
-    // PCは1280x720が収まる最大の整数倍。スマホは画面1px＝ワールド1px。どちらもマップ外が映らない範囲に収める。
-    zoom=IS_MOBILE ? Math.max(1,need) : Math.max(1,Math.ceil(need),Math.floor(Math.min(w/PC_AUTO_WIDTH,h/PC_AUTO_HEIGHT)));
-  }else{
-    // 選んだ倍率はウィンドウサイズが変わっても変えない（マップより広い窓ではマップの外が黒く映る）。
-    zoom=screenZoomSetting;
-  }
+  // 選んだ倍率はウィンドウサイズが変わっても変えない（マップより広い窓ではマップの外が黒く映る）。
+  const zoom=screenZoomSetting;
   const d=deviceScale(w*h);
   // 見た目の大きさは選んだ倍率どおり（物理ピクセル数が増えた分だけカメラ倍率も掛ける）。
   const camZoom=zoom*d;
