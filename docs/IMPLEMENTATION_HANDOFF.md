@@ -33,7 +33,7 @@
 - replaced socket (close 4000) must not auto-reconnect
 - keep 12s heartbeat, 25s ping, authoritative heartbeat snapshot, 1/2/4/8 reconnect
 - duplicate account: newest socket wins
-- preserve 3 current maps, chat and Y-sort
+- preserve the current maps (SPEC §2), chat and Y-sort
 - old quiz and money (夏円) were removed in β 0.54; do not restore them
 
 ## Files
