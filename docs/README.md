@@ -2,6 +2,8 @@
 
 2026-09-26以降、仕様・技術判断はGitHub上の文書を正本とする。
 
+作業ルール・検証手順・会話でだけ決まっていた判断は `../AGENTS.md` にまとめてある（Claude / GPT 共通）。
+
 ## Canonical documents
 
 - `../SPEC.md` — ゲーム全体仕様
